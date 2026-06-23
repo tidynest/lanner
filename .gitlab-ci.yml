@@ -8,10 +8,14 @@ check:
   stage: check
   image: rust:latest
   before_script:
-    # If libgtk4-layer-shell-dev is not available, build it from source
-    # (see CONTRIBUTING.md). Tracked as an open issue until verified.
     - apt-get update
-    - apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+    - apt-get install -y libgtk-4-dev libwayland-dev wayland-protocols meson ninja-build git
+    # gtk4-layer-shell is not packaged on Debian/Ubuntu, so build it from source.
+    - git clone --depth 1 https://github.com/wmww/gtk4-layer-shell /tmp/gls
+    - meson setup --prefix=/usr -Dintrospection=false -Dvapi=false -Dexamples=false -Ddocs=false -Dtests=false /tmp/gls/build /tmp/gls
+    - ninja -C /tmp/gls/build
+    - ninja -C /tmp/gls/build install
+    - ldconfig
     - rustup component add rustfmt clippy
   script:
     - cargo fmt --all -- --check

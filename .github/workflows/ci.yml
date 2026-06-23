@@ -13,12 +13,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # If libgtk4-layer-shell-dev is not available on the runner, build it from
-      # source (see CONTRIBUTING.md). Tracked as an open issue until verified.
-      - name: Install system libraries
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+          sudo apt-get install -y libgtk-4-dev libwayland-dev wayland-protocols meson ninja-build
+      - name: Build and install gtk4-layer-shell
+        # Not packaged on Ubuntu, so build the C library from source.
+        run: |
+          git clone --depth 1 https://github.com/wmww/gtk4-layer-shell /tmp/gls
+          meson setup --prefix=/usr -Dintrospection=false -Dvapi=false -Dexamples=false -Ddocs=false -Dtests=false /tmp/gls/build /tmp/gls
+          ninja -C /tmp/gls/build
+          sudo ninja -C /tmp/gls/build install
+          sudo ldconfig
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
