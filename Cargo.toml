@@ -1,0 +1,19 @@
+[package]
+name = "lanner"
+version = "0.1.0"
+edition = "2024"
+description = "Spotlight region video recorder for wlroots compositors"
+
+[dependencies]
+anyhow = "1.0.102"
+gtk4 = { version = "0.11.3", features = ["v4_12"] }
+gtk4-layer-shell = "0.8.0"
+signal-child = "1.0.7"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+which = "8.0.4"
+
+[lints.clippy]
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
