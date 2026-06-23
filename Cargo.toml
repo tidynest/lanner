@@ -3,6 +3,9 @@ name = "lanner"
 version = "0.1.0"
 edition = "2024"
 description = "Spotlight region video recorder for wlroots compositors"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/tidynest/lanner"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.102"

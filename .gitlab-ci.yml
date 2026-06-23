@@ -1,0 +1,20 @@
+stages:
+  - check
+
+variables:
+  CARGO_TERM_COLOR: always
+
+check:
+  stage: check
+  image: rust:latest
+  before_script:
+    # If libgtk4-layer-shell-dev is not available, build it from source
+    # (see CONTRIBUTING.md). Tracked as an open issue until verified.
+    - apt-get update
+    - apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+    - rustup component add rustfmt clippy
+  script:
+    - cargo fmt --all -- --check
+    - cargo clippy --all-targets -- -D warnings
+    - cargo test --all
+    - cargo build --release
