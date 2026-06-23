@@ -3,7 +3,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::{Result, bail};
-use gtk4::{prelude::*, {Application, ApplicationWindow, CssProvider, glib}};
+use gtk4::{
+    prelude::*,
+    {Application, ApplicationWindow, CssProvider, glib},
+};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::recorder::Recorder;
@@ -14,9 +17,11 @@ const NAMESPACE: &str = "lanner";
 /// Build the GTK application and run it. Returns once the overlay closes.
 pub fn run() -> Result<()> {
     gtk4::init()?;
-    
+
     if !gtk4_layer_shell::is_supported() {
-        bail!("Needs a wlroots compositor with wlr-layer-shell support (Hyprland, Sway, river, Wayfire, etc.)");
+        bail!(
+            "Needs a wlroots compositor with wlr-layer-shell support (Hyprland, Sway, river, Wayfire, etc.)"
+        );
     }
 
     let app = Application::builder().application_id(APP_ID).build();
@@ -49,27 +54,26 @@ fn build_overlay(app: &Application) {
 
     let keys = gtk4::EventControllerKey::new();
     let app = app.clone();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        match key {
-            gtk4::gdk::Key::Return => {
-                if recorder.borrow().is_none()
-                    && let Some(r) = rect.get() {
-                    match Recorder::start(r) {
-                        Ok(rec) => *recorder.borrow_mut() = Some(rec),
-                        Err(e) => tracing::error!("{e:#}"),
-                    }
+    keys.connect_key_pressed(move |_, key, _, _| match key {
+        gtk4::gdk::Key::Return => {
+            if recorder.borrow().is_none()
+                && let Some(r) = rect.get()
+            {
+                match Recorder::start(r) {
+                    Ok(rec) => *recorder.borrow_mut() = Some(rec),
+                    Err(e) => tracing::error!("{e:#}"),
                 }
-                glib::Propagation::Stop
             }
-            gtk4::gdk::Key::Escape => {
-                if let Some(rec) = recorder.borrow_mut().take() {
-                    rec.stop();
-                }
-                app.quit();
-                glib::Propagation::Stop
-            }
-            _ => glib::Propagation::Proceed,
+            glib::Propagation::Stop
         }
+        gtk4::gdk::Key::Escape => {
+            if let Some(rec) = recorder.borrow_mut().take() {
+                rec.stop();
+            }
+            app.quit();
+            glib::Propagation::Stop
+        }
+        _ => glib::Propagation::Proceed,
     });
     window.add_controller(keys);
 

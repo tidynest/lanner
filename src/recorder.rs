@@ -27,7 +27,7 @@ impl Recorder {
         }
 
         let geometry = geometry_arg(rect)?;
-        let output   = output_path()?;
+        let output = output_path()?;
 
         let child = Command::new("wf-recorder")
             .arg("-g")
@@ -60,15 +60,19 @@ fn geometry_arg(rect: Rect) -> Result<String> {
     if w < 1 || h < 1 {
         bail!("selection too small to record");
     }
-    Ok(format!("{},{} {w}x{h}", rect.x.round() as i32, rect.y.round() as i32))
+    Ok(format!(
+        "{},{} {w}x{h}",
+        rect.x.round() as i32,
+        rect.y.round() as i32
+    ))
 }
 
 /// Build a timestamped output path under `~/Videos`, creating the directory.
 fn output_path() -> Result<PathBuf> {
     let home = std::env::var("HOME").context("HOME not set")?;
-    let dir  = PathBuf::from(&home).join("Videos");
+    let dir = PathBuf::from(&home).join("Videos");
     std::fs::create_dir_all(&dir).context("could not create ~/Videos")?;
-    let ts   = SystemTime::now()
+    let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
@@ -82,9 +86,23 @@ mod tests {
     #[test]
     fn geometry_formats_and_rejects_degenerate() {
         assert_eq!(
-            geometry_arg(Rect { x: 100.4, y: 200.6, w: 1280.0, h: 720.0 }).ok(),
+            geometry_arg(Rect {
+                x: 100.4,
+                y: 200.6,
+                w: 1280.0,
+                h: 720.0
+            })
+            .ok(),
             Some("100,201 1280x720".to_owned())
         );
-        assert!(geometry_arg(Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }).is_err());
+        assert!(
+            geometry_arg(Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0
+            })
+            .is_err()
+        );
     }
 }

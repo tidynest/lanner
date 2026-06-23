@@ -66,7 +66,12 @@ fn normalise(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
 }
 
 /// Paint the dim and the spotlight hole. Cairo errors bubble to the caller.
-fn draw_spotlight(cr: &cairo::Context, w: i32, h: i32, rect: Option<Rect>) -> Result<(), cairo::Error> {
+fn draw_spotlight(
+    cr: &cairo::Context,
+    w: i32,
+    h: i32,
+    rect: Option<Rect>,
+) -> Result<(), cairo::Error> {
     // Dim the whole surface. NB: cr.paint() drops semi-transparent content on
     // this GTK4/Wayland stack, so fill an explicit rectangle instead.
     cr.set_source_rgba(0.02, 0.03, 0.06, 0.55);
