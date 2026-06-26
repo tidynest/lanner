@@ -42,7 +42,7 @@ impl Recorder {
     }
 
     /// Stop recording: SIGINT lets wf-recorder finalise the MKV, then we wait.
-    /// Never use kill() - SIGINT truncates the file.
+    /// Never use kill() - SIGKILL would truncate the file.
     pub fn stop(mut self) {
         if let Err(e) = self.child.interrupt() {
             tracing::error!("could not signal wf-recorder: {e}");
