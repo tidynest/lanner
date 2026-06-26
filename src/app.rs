@@ -13,6 +13,7 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
+use crate::controls::{self, Settings, SharedSettings};
 use crate::overlay::Rect;
 use crate::recorder::Recorder;
 use crate::transcode;
@@ -56,22 +57,31 @@ fn build_overlay(app: &Application) {
 
     let (surface, rect, locked) = crate::overlay::build_surface();
 
-    // gtk4::Overlay stacks a floating control bar on top of the spotlight
-    // DrawingArea (which stays on the draw/input base). Bar is hidden until we
-    // actually record, so it never blocks selection.
+    // gtk4::Overlay stacks the control bar on top of the spotlight DrawingArea
+    // (which stays on the draw/input base). The bar shows the pre-draw pickers
+    // during selection, then swaps to a Stop button while recording.
     let overlay = Overlay::new();
     overlay.set_child(Some(&surface));
 
-    let bar = Box::new(Orientation::Horizontal, 0);
+    // Shared user choices (audio source + output format), written by the picker
+    // buttons and read at record-start (audio) and stop (format).
+    let settings: SharedSettings = Rc::new(RefCell::new(Settings::default()));
+
+    // Visible from launch (top-centre) so audio/format can be chosen before the
+    // region is drawn. On record we hide the pickers, reveal Stop, and the bar
+    // moves clear of the capture hole via place_off_hole.
+    let bar = Box::new(Orientation::Horizontal, 12);
     bar.add_css_class("control-bar");
-    bar.set_halign(Align::Start);
+    bar.set_halign(Align::Center);
     bar.set_valign(Align::Start);
-    bar.set_margin_start(PAD);
     bar.set_margin_top(PAD);
-    bar.set_visible(false);
+
+    let pickers = controls::build_pickers(&settings);
+    bar.append(&pickers);
 
     let stop = Button::with_label("\u{23f9}  Stop");
     stop.add_css_class("stop-btn");
+    stop.set_visible(false);
     bar.append(&stop);
     overlay.add_overlay(&bar);
 
@@ -81,44 +91,60 @@ fn build_overlay(app: &Application) {
     {
         let recorder = recorder.clone();
         let app = app.clone();
-        stop.connect_clicked(move |_| stop_and_quit(&recorder, &app));
+        let settings = settings.clone();
+        stop.connect_clicked(move |_| stop_and_quit(&recorder, &app, &settings));
     }
 
     // Watch our own lockfile; a second invocation deletes it to request a stop.
     {
         let recorder = recorder.clone();
         let app = app.clone();
+        let settings = settings.clone();
         gtk4::glib::timeout_add_local(std::time::Duration::from_millis(150), move || {
             if crate::lockfile::is_held() {
                 gtk4::glib::ControlFlow::Continue
             } else {
-                stop_and_quit(&recorder, &app);
+                stop_and_quit(&recorder, &app, &settings);
                 gtk4::glib::ControlFlow::Break
             }
         });
     }
 
     let keys = EventControllerKey::new();
+    // Capture phase: the overlay's Enter (record) and Esc (cancel) must win over
+    // any focused picker button, else a focused toggle eats the key first.
+    keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
     let app = app.clone();
     let win = window.clone();
     let bar = bar.clone();
+    let pickers = pickers.clone();
+    let stop = stop.clone();
     let overlay = overlay.clone();
     let locked = locked.clone();
     let surface = surface.clone();
+    let settings = settings.clone();
     keys.connect_key_pressed(move |_, key, _, _| match key {
         Key::Return => {
             if recorder.borrow().is_none()
                 && let Some(r) = rect.get()
             {
-                match Recorder::start(r) {
+                let audio = settings.borrow().audio;
+                match Recorder::start(r, audio) {
                     Ok(rec) => {
                         *recorder.borrow_mut() = Some(rec);
                         locked.set(true);
                         surface.queue_draw(); // repaint: drop the dim, keep the border
                         win.set_keyboard_mode(KeyboardMode::None); // hand keys to the filmed app
-                        // Show the bar BEFORE measuring: a hidden widget measures
-                        // 0, which would make the input region empty (bar dead).
-                        bar.set_visible(true);
+
+                        // Swap the bar from pre-draw pickers to the Stop button,
+                        // and from centred to margin-positioned so place_off_hole
+                        // can steer it clear of the capture. Measure AFTER the
+                        // swap: a hidden widget measures 0, which would make the
+                        // input region empty (bar dead).
+                        pickers.set_visible(false);
+                        stop.set_visible(true);
+                        bar.set_halign(Align::Start);
+                        bar.set_margin_start(PAD);
                         let bw = bar.measure(Orientation::Horizontal, -1).1;
                         let bh = bar.measure(Orientation::Vertical, -1).1;
                         let bar_rect = match place_off_hole(
@@ -155,7 +181,7 @@ fn build_overlay(app: &Application) {
             Propagation::Stop
         }
         Key::Escape => {
-            stop_and_quit(&recorder, &app);
+            stop_and_quit(&recorder, &app, &settings);
             Propagation::Stop
         }
         _ => Propagation::Proceed,
@@ -167,12 +193,17 @@ fn build_overlay(app: &Application) {
 
 /// Stop any active recording (finalises the MKV) and quit. Shared by Esc and
 /// the STOP button so the stop path lives in exactly one place.
-fn stop_and_quit(recorder: &Rc<RefCell<Option<Recorder>>>, app: &Application) {
+fn stop_and_quit(
+    recorder: &Rc<RefCell<Option<Recorder>>>,
+    app: &Application,
+    settings: &SharedSettings,
+) {
     if let Some(rec) = recorder.borrow_mut().take() {
         let mkv = rec.stop();
+        let format = settings.borrow().format;
         // blocking transcode on the GTK thread: async + a spinner is in M8.
-        // MP4 hard-wired until the M6 format selector; MKV kept as the safe original.
-        if let Err(e) = transcode::run(transcode::Format::Mp4, &mkv) {
+        // MKV kept as the crash-safe original if ffmpeg fails.
+        if let Err(e) = transcode::run(format, &mkv) {
             tracing::error!("transcode failed, keeping MKV {}: {e}", mkv.display());
         }
     }
@@ -249,6 +280,22 @@ fn load_css() {
             border-radius: 14px;
             padding: 6px 8px;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+        }
+        .bar-caption {
+            color: rgba(220, 230, 245, 0.65);
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .seg {
+            background: rgba(40, 48, 66, 0.85);
+            color: #e6ecf5;
+            border: 1px solid rgba(102, 199, 255, 0.18);
+            padding: 4px 12px;
+        }
+        .seg:checked {
+            background: linear-gradient(180deg, #5db4ff, #3d86e2);
+            color: #ffffff;
+            border-color: rgba(102, 199, 255, 0.6);
         }
         .stop-btn {
             background: linear-gradient(180deg, #ff5d6c, #e23b4e);

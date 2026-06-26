@@ -9,6 +9,7 @@ data moves through the program.
 | :--- | :--- |
 | `main.rs` | Entry point: initialises logging, runs the lockfile toggle check (a second invocation stops the first and exits), then launches the app. |
 | `app.rs` | GTK application, the layer-shell overlay window, the control bar, key handling, the lockfile watch, and phase wiring. |
+| `controls.rs` | The pre-draw pickers (audio source and output format) as segmented radio groups, plus the shared `Settings` they write. |
 | `overlay.rs` | The Cairo spotlight (dim, transparent hole, border) and the border-only recording draw, the rubber-band gesture, the selection state, and the per-phase surface input region. |
 | `recorder.rs` | Spawns and stops `wf-recorder`, formats the capture geometry, builds the output path, and returns the finalised MKV path on stop. |
 | `transcode.rs` | Pure, unit-tested `ffmpeg` argv builders (MP4, WebM, AV1, WebP, GIF) plus a blocking runner that converts the MKV to the chosen format. |
@@ -20,13 +21,19 @@ data moves through the program.
    exists, this invocation is a toggle: it deletes the lock (which the running
    instance is watching) and exits. Otherwise it claims the lock and `app.rs`
    builds a fullscreen overlay surface on the wlroots overlay layer.
-2. **Select.** `overlay.rs` uses a `GestureDrag` to update a shared rectangle.
-   The draw function dims the whole surface and clears a transparent hole at the
-   current selection. Esc cancels.
+2. **Select.** The control bar is up with the pre-draw pickers (`controls.rs`):
+   audio source and output format, written to a shared `Settings`. `overlay.rs`
+   uses a `GestureDrag` to update a shared rectangle; the draw function dims the
+   whole surface and clears a transparent hole at the current selection. The
+   window key controller is capture-phase, so Enter and Esc reach the overlay
+   even while a picker button holds focus. Esc cancels.
 3. **Record (Enter).** `recorder.rs` formats the rectangle as a `wf-recorder`
-   geometry string (`X,Y WxH`) and spawns `wf-recorder`, writing
+   geometry string (`X,Y WxH`); if an audio source was chosen it resolves the
+   `pactl` device (System = the default sink's `.monitor`, Mic = the default
+   source) and adds `--audio`. It spawns `wf-recorder`, writing
    `~/Videos/lanner-<timestamp>.mkv`. The overlay then switches to the recording
    phase:
+   - the pre-draw pickers hide and the bar collapses to the Stop button;
    - the dim is dropped, leaving only the region border;
    - the keyboard is handed to the filmed app (`KeyboardMode::None`);
    - the surface input region shrinks to just the control bar, so pointer events
@@ -38,13 +45,12 @@ data moves through the program.
    instance sees it gone and stops. Either path calls into `recorder.rs`, which
    sends `SIGINT` so `wf-recorder` flushes and finalises the MKV, then waits for
    the process to exit.
-5. **Transcode.** On stop, `recorder.rs` returns the MKV path and `app.rs` calls
-   `transcode::run`, which shells out to `ffmpeg` to convert it to the chosen
-   format beside the original (e.g. `lanner-<ts>.mp4`). The MKV is kept as the
-   crash-safe original; if `ffmpeg` fails it is left in place and the error is
-   logged. The format is currently MP4; the per-recording picker arrives with the
-   M6 control bar. The transcode runs on the GTK thread before the app quits;
-   moving it off-thread with progress feedback is later polish.
+5. **Transcode.** On stop, `recorder.rs` returns the MKV path and `app.rs` reads
+   the chosen format from `Settings` and calls `transcode::run`, which shells out
+   to `ffmpeg` to convert the MKV beside the original (e.g. `lanner-<ts>.webm`).
+   The MKV is kept as the crash-safe original; if `ffmpeg` fails it is left in
+   place and the error is logged. The transcode runs on the GTK thread before the
+   app quits; moving it off-thread with progress feedback is later polish.
 
 ## Phases and input regions
 
@@ -71,3 +77,7 @@ for the bar, so it hides and you stop with the keybind.
 - A widget measures zero while hidden, so the control bar is shown before its size
   is measured for the input region; otherwise the region would be empty and the
   bar unclickable.
+- The picker buttons are focusable and GTK gives the first one initial focus, so a
+  focused toggle would otherwise swallow Enter (and the press would flip the radio
+  back). The key controller runs in the capture phase so the overlay's Enter and
+  Esc win over the focused button.

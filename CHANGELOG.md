@@ -21,5 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never captured.
 - Transcode of the finalised MKV to a final format via `ffmpeg` (M5). Pure,
   unit-tested argv builders for MP4 (H.264), WebM (VP9), AV1 (SVT-AV1), animated
-  WebP, and GIF (palettegen); MP4 is wired into the stop path, the others land
-  with the M6 format picker. The source MKV is kept as the crash-safe original.
+  WebP, and GIF (palettegen). The source MKV is kept as the crash-safe original.
+- Pre-draw control bar (M6): segmented pickers for the audio source (None,
+  System, or Mic) and the output format, written to a shared `Settings`. The
+  audio choice resolves a `pactl` device and passes `--audio` to `wf-recorder`
+  (System = the default sink's monitor, Mic = the default source); the format
+  choice drives the transcode on stop. The bar shows during selection and
+  collapses to the Stop button once recording starts.

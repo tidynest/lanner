@@ -37,8 +37,13 @@ and later transcode) into a single tool.
   SIGINT so the file is always playable.
 - Never films its own UI: the dim, the border, and the control bar all sit
   outside the captured geometry.
-- Planned: transcode to MP4, WebM, GIF, animated WebP, and AV1; audio source
-  toggles; a countdown; a REC indicator and timer; desktop notifications.
+- Pre-draw control bar: pick the audio source (None, System, or Mic) and the
+  output format (MP4, WebM, AV1, animated WebP, or GIF) before you draw; on
+  record the bar collapses to the Stop button.
+- Captures system or microphone audio via the chosen `pactl` device, then
+  transcodes the MKV to your chosen format with `ffmpeg`.
+- Planned: a countdown with a user-set delay; a REC indicator and timer;
+  desktop notifications and clipboard copy of the saved path.
 
 ## Requirements
 
@@ -65,7 +70,8 @@ The binary is at `target/release/lanner`.
 
 ## Usage
 
-Run it, drag a rectangle over the area you want, then press Enter to start
+Run it; a control bar appears at the top. Pick your audio source and output
+format, drag a rectangle over the area you want, then press Enter to start
 recording. While recording you can use your system normally; the region keeps
 capturing. Stop with the on-overlay Stop button, or by running lanner again (the
 second invocation toggles the recording off). Press Esc to cancel before
@@ -75,8 +81,9 @@ recording starts.
 lanner
 ```
 
-Recordings are written to `~/Videos/lanner-<timestamp>.mkv`, then transcoded to a
-matching `.mp4`. The MKV is kept as the crash-safe original.
+Recordings are written to `~/Videos/lanner-<timestamp>.mkv`, then transcoded to
+your chosen format (e.g. `.webm`) beside it. The MKV is kept as the crash-safe
+original.
 
 Bind it to a key in Hyprland (`~/.config/hypr/hyprland.conf`) so one press starts
 and the next stops:
@@ -94,8 +101,8 @@ the keybind to stop.
 - [x] M2: rubber-band selection with a transparent hole
 - [x] M3: region recording to MKV via `wf-recorder`
 - [x] M4: stop methods (Stop button, keybind toggle), input passthrough, and border-only recording
-- [x] M5: transcode to MP4, WebM, GIF, animated WebP, AV1 (MP4 wired; format picker is M6)
-- [ ] M6: pre-draw control bar (audio source and output format toggles)
+- [x] M5: transcode to MP4, WebM, GIF, animated WebP, AV1
+- [x] M6: pre-draw control bar (audio source and output format toggles)
 - [ ] M7: countdown with a user-set delay
 - [ ] M8: niceties (desktop notification, clipboard path, REC indicator and timer)
 

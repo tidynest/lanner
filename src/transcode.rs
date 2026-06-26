@@ -8,8 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
-#[allow(dead_code)] // variants wired one-by-one; drop this when the M6 selector reaches all
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Format {
     Av1,
     Gif,

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod controls;
 mod lockfile;
 mod overlay;
 mod recorder;

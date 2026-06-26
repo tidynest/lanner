@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use signal_child::Signalable;
 
+use crate::controls::Audio;
 use crate::overlay::Rect;
 
 /// A running recording. Always call `stop` so the MKV is finalised; dropping
@@ -20,8 +21,9 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Start recording the given region to a fresh MKV under `Videos`.
-    pub fn start(rect: Rect) -> Result<Self> {
+    /// Start recording the given region to a fresh MKV under `Videos`,
+    /// optionally capturing `audio`.
+    pub fn start(rect: Rect, audio: Audio) -> Result<Self> {
         if which::which("wf-recorder").is_err() {
             bail!("wf-recorder not found - install it: sudo pacman -S wf-recorder");
         }
@@ -29,13 +31,14 @@ impl Recorder {
         let geometry = geometry_arg(rect)?;
         let output = output_path()?;
 
-        let child = Command::new("wf-recorder")
-            .arg("-g")
-            .arg(&geometry)
-            .arg("-f")
-            .arg(&output)
-            .spawn()
-            .context("failed to spawn wf-recorder")?;
+        let mut cmd = Command::new("wf-recorder");
+        cmd.arg("-g").arg(&geometry).arg("-f").arg(&output);
+        if let Some(device) = audio_device(audio)? {
+            cmd.arg(format!("--audio={device}"));
+            tracing::info!("audio source: {device}");
+        }
+
+        let child = cmd.spawn().context("failed to spawn wf-recorder")?;
 
         tracing::info!("recording {geometry} -> {}", output.display());
         Ok(Self { child, output })
@@ -81,9 +84,50 @@ fn output_path() -> Result<PathBuf> {
     Ok(dir.join(format!("lanner-{ts}.mkv")))
 }
 
+/// Resolve the wf-recorder `--audio` device for `audio`, querying pactl for the
+/// default sink/source as needed. `None` records silently (no flag, no query).
+fn audio_device(audio: Audio) -> Result<Option<String>> {
+    Ok(match audio {
+        Audio::None => None,
+        Audio::System => Some(monitor_source(&pactl("get-default-sink")?)),
+        Audio::Mic => Some(pactl("get-default-source")?),
+    })
+}
+
+/// The PulseAudio monitor source for a sink: wf-recorder captures system audio
+/// from `<sink>.monitor`.
+fn monitor_source(sink: &str) -> String {
+    format!("{sink}.monitor")
+}
+
+/// Run `pactl <arg>` and return its trimmed stdout line.
+fn pactl(arg: &str) -> Result<String> {
+    let out = Command::new("pactl")
+        .arg(arg)
+        .output()
+        .context("failed to run pactl - is PipeWire/PulseAudio running?")?;
+    if !out.status.success() {
+        bail!("pactl {arg} failed");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_none_records_silently() {
+        assert!(matches!(audio_device(Audio::None), Ok(None)));
+    }
+
+    #[test]
+    fn system_uses_sink_monitor() {
+        assert_eq!(
+            monitor_source("alsa_output.pci-x"),
+            "alsa_output.pci-x.monitor"
+        );
+    }
 
     #[test]
     fn geometry_formats_and_rejects_degenerate() {
