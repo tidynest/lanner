@@ -32,3 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   10s) on the bar. When set, Enter shows the number counting down over the
   selection and only spawns `wf-recorder` at zero, so the countdown is never
   part of the recording. Off keeps the immediate-record path.
+
+### Fixed
+
+- GIF output is capped to 640 px wide. A full-resolution GIF reached 100+ MB,
+  which encoded very slowly and made many image viewers display only the first
+  frame (the file was animated, just too large to render).

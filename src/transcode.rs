@@ -69,9 +69,12 @@ pub fn args(format: Format, input: &Path, output: &Path) -> Vec<String> {
             "128k",
         ],
         Format::Gif => &[
-            // ffmpeg palettegen path (no gifski dependency); good enough for v1.
+            // ffmpeg palettegen path (no gifski dependency). Cap width at 640: a
+            // full-res GIF balloons past 100 MB, which encodes slowly and makes
+            // many viewers show only the first frame. `\,` escapes the comma in
+            // min() so the filtergraph parser keeps it inside the expression.
             "-vf",
-            "fps=20,scale=iw:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+            "fps=20,scale=min(640\\,iw):-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
         ],
         Format::Webm => &[
             "-c:v",
@@ -139,5 +142,13 @@ mod tests {
         assert_eq!(Format::Webm.ext(), "webm");
         assert_eq!(Format::Av1.ext(), "mp4");
         assert_eq!(Format::Gif.ext(), "gif");
+    }
+
+    #[test]
+    fn gif_caps_width() {
+        let a = args(Format::Gif, Path::new("in.mkv"), Path::new("out.gif"));
+        // Width is capped (escaped comma keeps min() inside the filtergraph),
+        // else a full-res GIF balloons and viewers show only one frame.
+        assert!(a.iter().any(|s| s.contains(r"scale=min(640\,iw)")));
     }
 }
