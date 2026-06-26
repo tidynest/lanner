@@ -17,8 +17,14 @@ pub struct Rect {
 }
 
 /// What `build_surface` returns: the drawing area, the live selection rect (None
-/// until a drag starts), and the lock that freezes selection while recording.
-type Surface = (DrawingArea, Rc<Cell<Option<Rect>>>, Rc<Cell<bool>>);
+/// until a drag starts), the lock that freezes selection while recording, and the
+/// countdown value (Some(n) while counting down before record, else None).
+type Surface = (
+    DrawingArea,
+    Rc<Cell<Option<Rect>>>,
+    Rc<Cell<bool>>,
+    Rc<Cell<Option<u32>>>,
+);
 
 /// Build the spotlight DrawingArea with live rubber-band selection.
 pub fn build_surface() -> Surface {
@@ -35,11 +41,16 @@ pub fn build_surface() -> Surface {
     // move the hole away from the fixed capture geometry.
     let locked: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
+    // Some(n) while counting down before recording starts; drives the on-overlay
+    // number and freezes the drag so the hole can't move mid-count.
+    let countdown: Rc<Cell<Option<u32>>> = Rc::new(Cell::new(None));
+
     {
         let rect = rect.clone();
         let locked = locked.clone();
+        let countdown = countdown.clone();
         area.set_draw_func(move |_, cr, w, h| {
-            if let Err(e) = draw_spotlight(cr, w, h, rect.get(), locked.get()) {
+            if let Err(e) = draw_spotlight(cr, w, h, rect.get(), locked.get(), countdown.get()) {
                 tracing::warn!("spotlight draw failed: {e}");
             }
         });
@@ -54,9 +65,10 @@ pub fn build_surface() -> Surface {
         let rect = rect.clone();
         let area = area.clone();
         let locked = locked.clone();
+        let countdown = countdown.clone();
         drag.connect_drag_update(move |_, dx, dy| {
-            if locked.get() {
-                return;
+            if locked.get() || countdown.get().is_some() {
+                return; // frozen while recording or counting down
             }
             let (sx, sy) = start.get();
             rect.set(Some(normalise(sx, sy, sx + dx, sy + dy)));
@@ -64,7 +76,7 @@ pub fn build_surface() -> Surface {
         });
     }
     area.add_controller(drag);
-    (area, rect, locked)
+    (area, rect, locked, countdown)
 }
 
 /// Normalise two corner points into a positive-size rectangle.
@@ -86,6 +98,7 @@ fn draw_spotlight(
     h: i32,
     rect: Option<Rect>,
     recording: bool,
+    countdown: Option<u32>,
 ) -> Result<(), cairo::Error> {
     if !recording {
         // Dim the whole surface. NB: cr.paint() drops semi-transparent content on
@@ -109,7 +122,38 @@ fn draw_spotlight(
         cr.set_line_width(2.0);
         cr.rectangle(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0);
         cr.stroke()?;
+
+        if let Some(n) = countdown {
+            draw_countdown(cr, r, n)?;
+        }
     }
+    Ok(())
+}
+
+/// Draw the countdown number centred in the selection: white with a dark outline
+/// so it stays legible over whatever shows through the transparent hole. Sized to
+/// the selection and clamped so a small region still gets a readable digit.
+fn draw_countdown(cr: &cairo::Context, r: Rect, n: u32) -> Result<(), cairo::Error> {
+    let text = n.to_string();
+    let size = (r.h * 0.5).clamp(28.0, 220.0);
+    cr.select_font_face(
+        "sans-serif",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
+    cr.set_font_size(size);
+
+    let ext = cr.text_extents(&text)?;
+    let tx = r.x + r.w / 2.0 - ext.width() / 2.0 - ext.x_bearing();
+    let ty = r.y + r.h / 2.0 - ext.height() / 2.0 - ext.y_bearing();
+    cr.move_to(tx, ty);
+    cr.text_path(&text);
+
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.78); // outline for contrast
+    cr.set_line_width(size * 0.06);
+    cr.stroke_preserve()?;
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.97); // bright fill
+    cr.fill()?;
     Ok(())
 }
 

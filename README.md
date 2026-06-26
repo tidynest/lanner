@@ -42,8 +42,10 @@ and later transcode) into a single tool.
   record the bar collapses to the Stop button.
 - Captures system or microphone audio via the chosen `pactl` device, then
   transcodes the MKV to your chosen format with `ffmpeg`.
-- Planned: a countdown with a user-set delay; a REC indicator and timer;
-  desktop notifications and clipboard copy of the saved path.
+- Optional countdown (Off, 3s, 5s, or 10s) shown as a number over the selection
+  before recording starts, so the count is never in the file.
+- Planned: a REC indicator and timer; desktop notifications and clipboard copy
+  of the saved path.
 
 ## Requirements
 
@@ -70,11 +72,12 @@ The binary is at `target/release/lanner`.
 
 ## Usage
 
-Run it; a control bar appears at the top. Pick your audio source and output
-format, drag a rectangle over the area you want, then press Enter to start
-recording. While recording you can use your system normally; the region keeps
-capturing. Stop with the on-overlay Stop button, or by running lanner again (the
-second invocation toggles the recording off). Press Esc to cancel before
+Run it; a control bar appears at the top. Pick your audio source, output format,
+and optional countdown delay, drag a rectangle over the area you want, then press
+Enter. If a delay is set, a countdown shows over the selection first; then
+recording starts. While recording you can use your system normally; the region
+keeps capturing. Stop with the on-overlay Stop button, or by running lanner again
+(the second invocation toggles the recording off). Press Esc to cancel before
 recording starts.
 
 ```bash
@@ -103,7 +106,7 @@ the keybind to stop.
 - [x] M4: stop methods (Stop button, keybind toggle), input passthrough, and border-only recording
 - [x] M5: transcode to MP4, WebM, GIF, animated WebP, AV1
 - [x] M6: pre-draw control bar (audio source and output format toggles)
-- [ ] M7: countdown with a user-set delay
+- [x] M7: countdown with a user-set delay
 - [ ] M8: niceties (desktop notification, clipboard path, REC indicator and timer)
 
 ## Architecture

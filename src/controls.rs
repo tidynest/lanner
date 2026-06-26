@@ -23,6 +23,7 @@ pub enum Audio {
 pub struct Settings {
     pub audio: Audio,
     pub format: Format,
+    pub countdown_secs: u32,
 }
 
 impl Default for Settings {
@@ -30,14 +31,15 @@ impl Default for Settings {
         Self {
             audio: Audio::None,
             format: Format::Mp4,
+            countdown_secs: 0,
         }
     }
 }
 
 pub type SharedSettings = Rc<RefCell<Settings>>;
 
-/// Build the picker section (audio + format radio groups) wired to `settings`.
-/// `app.rs` adds this to the bar and hides it when recording starts.
+/// Build the picker section (audio, format, and countdown groups) wired to
+/// `settings`. `app.rs` adds this to the bar and hides it when recording starts.
 pub fn build_pickers(settings: &SharedSettings) -> Box {
     let row = Box::new(Orientation::Horizontal, 16);
     row.append(&labelled_group(
@@ -66,6 +68,15 @@ pub fn build_pickers(settings: &SharedSettings) -> Box {
         {
             let settings = settings.clone();
             move |f| settings.borrow_mut().format = f
+        },
+    ));
+    row.append(&labelled_group(
+        "Delay",
+        &[("Off", 0u32), ("3s", 3), ("5s", 5), ("10s", 10)],
+        0,
+        {
+            let settings = settings.clone();
+            move |s| settings.borrow_mut().countdown_secs = s
         },
     ));
     row

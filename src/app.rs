@@ -55,7 +55,7 @@ fn build_overlay(app: &Application) {
     window.set_exclusive_zone(-1); // ignore other panels' reserved space
     window.set_keyboard_mode(KeyboardMode::Exclusive); // so Esc reaches us
 
-    let (surface, rect, locked) = crate::overlay::build_surface();
+    let (surface, rect, locked, countdown) = crate::overlay::build_surface();
 
     // gtk4::Overlay stacks the control bar on top of the spotlight DrawingArea
     // (which stays on the draw/input base). The bar shows the pre-draw pickers
@@ -110,72 +110,110 @@ fn build_overlay(app: &Application) {
         });
     }
 
+    // The record-start sequence: spawn wf-recorder, swap the bar to Stop, and
+    // shrink the input region. Shared by the immediate path and the countdown
+    // timer's final tick, so the start logic lives in one place.
+    let begin_recording: Rc<dyn Fn(Rect)> = {
+        let recorder = recorder.clone();
+        let settings = settings.clone();
+        let locked = locked.clone();
+        let surface = surface.clone();
+        let win = window.clone();
+        let pickers = pickers.clone();
+        let stop = stop.clone();
+        let bar = bar.clone();
+        let overlay = overlay.clone();
+        Rc::new(move |r: Rect| {
+            let audio = settings.borrow().audio;
+            match Recorder::start(r, audio) {
+                Ok(rec) => {
+                    *recorder.borrow_mut() = Some(rec);
+                    locked.set(true);
+                    surface.queue_draw(); // repaint: drop the dim, keep the border
+                    win.set_keyboard_mode(KeyboardMode::None); // hand keys to the filmed app
+
+                    // Swap the bar from pre-draw pickers to the Stop button, and
+                    // from centred to margin-positioned so place_off_hole can
+                    // steer it clear of the capture. Measure AFTER the swap: a
+                    // hidden widget measures 0, emptying the input region.
+                    pickers.set_visible(false);
+                    stop.set_visible(true);
+                    bar.set_halign(Align::Start);
+                    bar.set_margin_start(PAD);
+                    let bw = bar.measure(Orientation::Horizontal, -1).1;
+                    let bh = bar.measure(Orientation::Vertical, -1).1;
+                    let bar_rect = match place_off_hole(
+                        (bar.margin_start(), bar.margin_top()),
+                        (bw, bh),
+                        (overlay.width(), overlay.height()),
+                        r,
+                        PAD,
+                    ) {
+                        Some((x, y)) => {
+                            bar.set_margin_start(x);
+                            bar.set_margin_top(y);
+                            (x, y, bw, bh)
+                        }
+                        None => {
+                            bar.set_visible(false);
+                            tracing::info!("full-screen capture: stop with the keybind");
+                            (0, 0, 0, 0)
+                        }
+                    };
+                    if let Some(gdk_surface) = win.surface() {
+                        crate::overlay::set_input_to_bar(
+                            &gdk_surface,
+                            bar_rect.0,
+                            bar_rect.1,
+                            bar_rect.2,
+                            bar_rect.3,
+                        );
+                    }
+                }
+                Err(e) => tracing::error!("{e:#}"),
+            }
+        })
+    };
+
     let keys = EventControllerKey::new();
     // Capture phase: the overlay's Enter (record) and Esc (cancel) must win over
     // any focused picker button, else a focused toggle eats the key first.
     keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
     let app = app.clone();
-    let win = window.clone();
-    let bar = bar.clone();
-    let pickers = pickers.clone();
-    let stop = stop.clone();
-    let overlay = overlay.clone();
-    let locked = locked.clone();
     let surface = surface.clone();
     let settings = settings.clone();
     keys.connect_key_pressed(move |_, key, _, _| match key {
         Key::Return => {
+            // Ignore Enter if already recording or already counting down.
             if recorder.borrow().is_none()
+                && countdown.get().is_none()
                 && let Some(r) = rect.get()
             {
-                let audio = settings.borrow().audio;
-                match Recorder::start(r, audio) {
-                    Ok(rec) => {
-                        *recorder.borrow_mut() = Some(rec);
-                        locked.set(true);
-                        surface.queue_draw(); // repaint: drop the dim, keep the border
-                        win.set_keyboard_mode(KeyboardMode::None); // hand keys to the filmed app
-
-                        // Swap the bar from pre-draw pickers to the Stop button,
-                        // and from centred to margin-positioned so place_off_hole
-                        // can steer it clear of the capture. Measure AFTER the
-                        // swap: a hidden widget measures 0, which would make the
-                        // input region empty (bar dead).
-                        pickers.set_visible(false);
-                        stop.set_visible(true);
-                        bar.set_halign(Align::Start);
-                        bar.set_margin_start(PAD);
-                        let bw = bar.measure(Orientation::Horizontal, -1).1;
-                        let bh = bar.measure(Orientation::Vertical, -1).1;
-                        let bar_rect = match place_off_hole(
-                            (bar.margin_start(), bar.margin_top()),
-                            (bw, bh),
-                            (overlay.width(), overlay.height()),
-                            r,
-                            PAD,
-                        ) {
-                            Some((x, y)) => {
-                                bar.set_margin_start(x);
-                                bar.set_margin_top(y);
-                                (x, y, bw, bh)
-                            }
-                            None => {
-                                bar.set_visible(false);
-                                tracing::info!("full-screen capture: stop with the keybind");
-                                (0, 0, 0, 0)
-                            }
-                        };
-                        if let Some(gdk_surface) = win.surface() {
-                            crate::overlay::set_input_to_bar(
-                                &gdk_surface,
-                                bar_rect.0,
-                                bar_rect.1,
-                                bar_rect.2,
-                                bar_rect.3,
-                            );
+                let secs = settings.borrow().countdown_secs;
+                if secs == 0 {
+                    begin_recording(r);
+                } else {
+                    // Counting down: keep the dim + hole up and draw N, ticking
+                    // once a second. wf-recorder is not spawned until 0, so the
+                    // count is never filmed.
+                    countdown.set(Some(secs));
+                    surface.queue_draw();
+                    let begin = begin_recording.clone();
+                    let countdown = countdown.clone();
+                    let surface = surface.clone();
+                    gtk4::glib::timeout_add_seconds_local(1, move || match countdown.get() {
+                        Some(v) if v > 1 => {
+                            countdown.set(Some(v - 1));
+                            surface.queue_draw();
+                            gtk4::glib::ControlFlow::Continue
                         }
-                    }
-                    Err(e) => tracing::error!("{e:#}"),
+                        _ => {
+                            countdown.set(None);
+                            surface.queue_draw();
+                            begin(r);
+                            gtk4::glib::ControlFlow::Break
+                        }
+                    });
                 }
             }
             Propagation::Stop

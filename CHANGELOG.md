@@ -28,3 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (System = the default sink's monitor, Mic = the default source); the format
   choice drives the transcode on stop. The bar shows during selection and
   collapses to the Stop button once recording starts.
+- Optional pre-record countdown (M7): a fourth segmented group (Off, 3s, 5s,
+  10s) on the bar. When set, Enter shows the number counting down over the
+  selection and only spawns `wf-recorder` at zero, so the countdown is never
+  part of the recording. Off keeps the immediate-record path.

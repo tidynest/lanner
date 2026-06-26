@@ -9,7 +9,7 @@ data moves through the program.
 | :--- | :--- |
 | `main.rs` | Entry point: initialises logging, runs the lockfile toggle check (a second invocation stops the first and exits), then launches the app. |
 | `app.rs` | GTK application, the layer-shell overlay window, the control bar, key handling, the lockfile watch, and phase wiring. |
-| `controls.rs` | The pre-draw pickers (audio source and output format) as segmented radio groups, plus the shared `Settings` they write. |
+| `controls.rs` | The pre-draw pickers (audio source, output format, countdown delay) as segmented radio groups, plus the shared `Settings` they write. |
 | `overlay.rs` | The Cairo spotlight (dim, transparent hole, border) and the border-only recording draw, the rubber-band gesture, the selection state, and the per-phase surface input region. |
 | `recorder.rs` | Spawns and stops `wf-recorder`, formats the capture geometry, builds the output path, and returns the finalised MKV path on stop. |
 | `transcode.rs` | Pure, unit-tested `ffmpeg` argv builders (MP4, WebM, AV1, WebP, GIF) plus a blocking runner that converts the MKV to the chosen format. |
@@ -27,8 +27,12 @@ data moves through the program.
    whole surface and clears a transparent hole at the current selection. The
    window key controller is capture-phase, so Enter and Esc reach the overlay
    even while a picker button holds focus. Esc cancels.
-3. **Record (Enter).** `recorder.rs` formats the rectangle as a `wf-recorder`
-   geometry string (`X,Y WxH`); if an audio source was chosen it resolves the
+3. **Record (Enter).** If a countdown delay is set, Enter first enters a
+   counting-down phase: `overlay.rs` draws the number over the selection and a
+   one-second `glib` timer ticks it down; `wf-recorder` is not spawned until it
+   reaches zero, so the count is never filmed. Then `recorder.rs` formats the
+   rectangle as a `wf-recorder` geometry string (`X,Y WxH`); if an audio source
+   was chosen it resolves the
    `pactl` device (System = the default sink's `.monitor`, Mic = the default
    source) and adds `--audio`. It spawns `wf-recorder`, writing
    `~/Videos/lanner-<timestamp>.mkv`. The overlay then switches to the recording
@@ -56,8 +60,9 @@ data moves through the program.
 
 The `locked` flag (shared from `overlay.rs`) marks the recording phase. It drives
 two things: the draw function paints the dim only while not recording, and the
-selection drag is frozen while recording so the hole cannot move away from the
-fixed capture geometry. During recording the window input region is set to the
+selection drag is frozen while recording, or while a countdown is in progress (a
+`countdown` cell holding `Some(n)`), so the hole cannot move away from the fixed
+capture geometry. That same `countdown` cell drives the on-overlay number. During recording the window input region is set to the
 control bar's rectangle alone, which is what lets the rest of the screen stay
 interactive.
 
