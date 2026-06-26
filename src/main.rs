@@ -5,6 +5,7 @@ mod app;
 mod lockfile;
 mod overlay;
 mod recorder;
+mod transcode;
 
 use anyhow::Result;
 

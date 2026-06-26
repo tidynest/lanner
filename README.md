@@ -44,7 +44,7 @@ and later transcode) into a single tool.
 
 - A wlroots-based Wayland compositor (Hyprland, Sway, river, Wayfire).
 - `wf-recorder` for screen capture.
-- `ffmpeg` for transcoding (planned milestones).
+- `ffmpeg` for transcoding to the final format.
 - System libraries `gtk4` and `gtk4-layer-shell`.
 
 On Arch Linux:
@@ -75,7 +75,8 @@ recording starts.
 lanner
 ```
 
-Recordings are written to `~/Videos/lanner-<timestamp>.mkv`.
+Recordings are written to `~/Videos/lanner-<timestamp>.mkv`, then transcoded to a
+matching `.mp4`. The MKV is kept as the crash-safe original.
 
 Bind it to a key in Hyprland (`~/.config/hypr/hyprland.conf`) so one press starts
 and the next stops:
@@ -93,7 +94,7 @@ the keybind to stop.
 - [x] M2: rubber-band selection with a transparent hole
 - [x] M3: region recording to MKV via `wf-recorder`
 - [x] M4: stop methods (Stop button, keybind toggle), input passthrough, and border-only recording
-- [ ] M5: transcode to MP4, WebM, GIF, animated WebP, AV1
+- [x] M5: transcode to MP4, WebM, GIF, animated WebP, AV1 (MP4 wired; format picker is M6)
 - [ ] M6: pre-draw control bar (audio source and output format toggles)
 - [ ] M7: countdown with a user-set delay
 - [ ] M8: niceties (desktop notification, clipboard path, REC indicator and timer)

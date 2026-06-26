@@ -15,6 +15,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::overlay::Rect;
 use crate::recorder::Recorder;
+use crate::transcode;
 
 const APP_ID: &str = "dev.lanner.Lanner";
 const NAMESPACE: &str = "lanner";
@@ -168,7 +169,12 @@ fn build_overlay(app: &Application) {
 /// the STOP button so the stop path lives in exactly one place.
 fn stop_and_quit(recorder: &Rc<RefCell<Option<Recorder>>>, app: &Application) {
     if let Some(rec) = recorder.borrow_mut().take() {
-        rec.stop();
+        let mkv = rec.stop();
+        // blocking transcode on the GTK thread: async + a spinner is in M8.
+        // MP4 hard-wired until the M6 format selector; MKV kept as the safe original.
+        if let Err(e) = transcode::run(transcode::Format::Mp4, &mkv) {
+            tracing::error!("transcode failed, keeping MKV {}: {e}", mkv.display());
+        }
     }
     app.quit();
 }
