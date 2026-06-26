@@ -86,7 +86,8 @@ lanner
 
 Recordings are written to `~/Videos/lanner-<timestamp>.mkv`, then transcoded to
 your chosen format (e.g. `.webm`) beside it. The MKV is kept as the crash-safe
-original.
+original. The transcode runs in the background, so lanner exits the moment you
+stop; the final file appears in `~/Videos` a moment later.
 
 Bind it to a key in Hyprland (`~/.config/hypr/hyprland.conf`) so one press starts
 and the next stops:

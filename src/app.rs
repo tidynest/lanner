@@ -239,10 +239,14 @@ fn stop_and_quit(
     if let Some(rec) = recorder.borrow_mut().take() {
         let mkv = rec.stop();
         let format = settings.borrow().format;
-        // blocking transcode on the GTK thread: async + a spinner is in M8.
-        // MKV kept as the crash-safe original if ffmpeg fails.
-        if let Err(e) = transcode::run(format, &mkv) {
-            tracing::error!("transcode failed, keeping MKV {}: {e}", mkv.display());
+        // Transcode in the background so the app quits and frees the overlay at
+        // once; ffmpeg finishes detached. MKV kept if it fails. A completion
+        // notification is M8.
+        if let Err(e) = transcode::spawn(format, &mkv) {
+            tracing::error!(
+                "could not start transcode, keeping MKV {}: {e}",
+                mkv.display()
+            );
         }
     }
     app.quit();

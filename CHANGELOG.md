@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection and only spawns `wf-recorder` at zero, so the countdown is never
   part of the recording. Off keeps the immediate-record path.
 
+### Changed
+
+- Transcoding runs detached: stopping a recording quits the app and frees the
+  overlay immediately, and `ffmpeg` finishes in the background (it previously
+  blocked the UI until the transcode completed). The MKV is kept if it fails.
+- The audio-source picker is disabled while the GIF format is selected, since
+  GIF carries no audio track.
+
 ### Fixed
 
 - GIF output is capped to 640 px wide. A full-resolution GIF reached 100+ MB,

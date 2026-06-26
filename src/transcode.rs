@@ -1,9 +1,9 @@
-//! MKV -> Final format. Pure argv builders (unit-tested) + a blocking runner.
+//! MKV -> Final format. Pure argv builders (unit-tested) + a detached runner.
 //! ffmpeg only: gifski (better GIFs) is optional for later.
 
 use std::{
-    path::{Path, PathBuf},
-    process::Command,
+    path::Path,
+    process::{Command, Stdio},
 };
 
 use anyhow::{Context, Result, bail};
@@ -107,21 +107,24 @@ pub fn args(format: Format, input: &Path, output: &Path) -> Vec<String> {
     a
 }
 
-/// Transcode `input` to `format` beside it, returning the new path. Blocking.
-pub fn run(format: Format, input: &Path) -> Result<PathBuf> {
+/// Start transcoding `input` to `format` beside it, WITHOUT waiting. The child
+/// ffmpeg is reparented to init and finishes in the background, so the caller can
+/// quit and free the overlay at once. Output is silenced to avoid async spam in
+/// the launching terminal; the MKV is kept, so a failed transcode loses nothing.
+/// Errors only on a missing binary or a failed spawn (a completion signal is M8).
+pub fn spawn(format: Format, input: &Path) -> Result<()> {
     if which::which("ffmpeg").is_err() {
         bail!("ffmpeg not found -> install it: sudo pacman -S ffmpeg");
     }
     let output = input.with_extension(format.ext());
-    let status = Command::new("ffmpeg")
+    Command::new("ffmpeg")
         .args(args(format, input, &output))
-        .status()
-        .context("failed to run ffmpeg")?;
-    if !status.success() {
-        bail!("ffmpeg exited with {status}");
-    }
-    tracing::info!("transcoded -> {}", output.display());
-    Ok(output)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("failed to start ffmpeg")?;
+    tracing::info!("transcoding in background -> {}", output.display());
+    Ok(())
 }
 
 #[cfg(test)]

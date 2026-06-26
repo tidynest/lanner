@@ -12,7 +12,7 @@ data moves through the program.
 | `controls.rs` | The pre-draw pickers (audio source, output format, countdown delay) as segmented radio groups, plus the shared `Settings` they write. |
 | `overlay.rs` | The Cairo spotlight (dim, transparent hole, border) and the border-only recording draw, the rubber-band gesture, the selection state, and the per-phase surface input region. |
 | `recorder.rs` | Spawns and stops `wf-recorder`, formats the capture geometry, builds the output path, and returns the finalised MKV path on stop. |
-| `transcode.rs` | Pure, unit-tested `ffmpeg` argv builders (MP4, WebM, AV1, WebP, GIF) plus a blocking runner that converts the MKV to the chosen format. |
+| `transcode.rs` | Pure, unit-tested `ffmpeg` argv builders (MP4, WebM, AV1, WebP, GIF) plus a detached runner that converts the MKV to the chosen format in the background. |
 | `lockfile.rs` | Single-instance PID lock in `$XDG_RUNTIME_DIR`; the basis of the keybind toggle. |
 
 ## Flow
@@ -50,11 +50,13 @@ data moves through the program.
    sends `SIGINT` so `wf-recorder` flushes and finalises the MKV, then waits for
    the process to exit.
 5. **Transcode.** On stop, `recorder.rs` returns the MKV path and `app.rs` reads
-   the chosen format from `Settings` and calls `transcode::run`, which shells out
-   to `ffmpeg` to convert the MKV beside the original (e.g. `lanner-<ts>.webm`).
-   The MKV is kept as the crash-safe original; if `ffmpeg` fails it is left in
-   place and the error is logged. The transcode runs on the GTK thread before the
-   app quits; moving it off-thread with progress feedback is later polish.
+   the chosen format from `Settings` and calls `transcode::spawn`, which shells
+   out to `ffmpeg` to convert the MKV beside the original (e.g.
+   `lanner-<ts>.webm`). It is detached: `spawn` does not wait, so the app quits
+   and frees the overlay at once while `ffmpeg` finishes in the background
+   (reparented to init). The MKV is kept as the crash-safe original. A completion
+   notification (and the GIF audio picker being greyed out) round out the UX; the
+   notification is a later milestone.
 
 ## Phases and input regions
 

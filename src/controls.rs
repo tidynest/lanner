@@ -42,7 +42,8 @@ pub type SharedSettings = Rc<RefCell<Settings>>;
 /// `settings`. `app.rs` adds this to the bar and hides it when recording starts.
 pub fn build_pickers(settings: &SharedSettings) -> Box {
     let row = Box::new(Orientation::Horizontal, 16);
-    row.append(&labelled_group(
+
+    let audio = labelled_group(
         "Audio",
         &[
             ("None", Audio::None),
@@ -54,7 +55,9 @@ pub fn build_pickers(settings: &SharedSettings) -> Box {
             let settings = settings.clone();
             move |a| settings.borrow_mut().audio = a
         },
-    ));
+    );
+    row.append(&audio);
+
     row.append(&labelled_group(
         "Format",
         &[
@@ -67,7 +70,11 @@ pub fn build_pickers(settings: &SharedSettings) -> Box {
         Format::Mp4,
         {
             let settings = settings.clone();
-            move |f| settings.borrow_mut().format = f
+            let audio = audio.clone();
+            move |f| {
+                settings.borrow_mut().format = f;
+                audio.set_sensitive(f != Format::Gif); // GIF has no audio track
+            }
         },
     ));
     row.append(&labelled_group(
