@@ -37,15 +37,17 @@ and later transcode) into a single tool.
   SIGINT so the file is always playable.
 - Never films its own UI: the dim, the border, and the control bar all sit
   outside the captured geometry.
-- Pre-draw control bar: pick the audio source (None, System, or Mic) and the
-  output format (MP4, WebM, AV1, animated WebP, or GIF) before you draw; on
-  record the bar collapses to the Stop button.
-- Captures system or microphone audio via the chosen `pactl` device, then
-  transcodes the MKV to your chosen format with `ffmpeg`.
+- Pre-draw control bar: pick the audio source (None, System, Mic, or Mic+System),
+  the output format (MP4, WebM, AV1, animated WebP, or GIF), and a countdown
+  delay before you draw; on record the bar collapses to a Stop button.
+- Captures system and/or microphone audio via the active `pactl` device (the
+  default input is used, so selecting a different mic just works); Mic+System
+  mixes both through a temporary PipeWire source that is torn down on stop.
 - Optional countdown (Off, 3s, 5s, or 10s) shown as a number over the selection
   before recording starts, so the count is never in the file.
-- Planned: a REC indicator and timer; desktop notifications and clipboard copy
-  of the saved path.
+- A live REC dot and elapsed timer on the overlay while recording.
+- Transcodes in the background (lanner quits at once) and fires a desktop
+  notification plus copies the saved path to the clipboard when it finishes.
 
 ## Requirements
 
@@ -53,6 +55,8 @@ and later transcode) into a single tool.
 - `wf-recorder` for screen capture.
 - `ffmpeg` for transcoding to the final format.
 - System libraries `gtk4` and `gtk4-layer-shell`.
+- Optional: `notify-send` (libnotify) and `wl-clipboard` (`wl-copy`) for the
+  on-finish notification and clipboard copy; recording works without them.
 
 On Arch Linux:
 
@@ -108,7 +112,7 @@ the keybind to stop.
 - [x] M5: transcode to MP4, WebM, GIF, animated WebP, AV1
 - [x] M6: pre-draw control bar (audio source and output format toggles)
 - [x] M7: countdown with a user-set delay
-- [ ] M8: niceties (desktop notification, clipboard path, REC indicator and timer)
+- [x] M8: niceties (desktop notification, clipboard path, REC indicator and timer)
 
 ## Architecture
 

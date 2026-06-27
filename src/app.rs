@@ -1,11 +1,14 @@
 //! GTK4 layer-shell overlay: spotlight region selection, then border-only
 //! recording with a floating Stop bar.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 use anyhow::{Result, bail};
 use gtk4::{
-    Align, Application, ApplicationWindow, Box, Button, CssProvider, EventControllerKey,
+    Align, Application, ApplicationWindow, Box, Button, CssProvider, EventControllerKey, Label,
     Orientation, Overlay,
     gdk::{Display, Key},
     glib::{ExitCode, Propagation},
@@ -79,6 +82,12 @@ fn build_overlay(app: &Application) {
     let pickers = controls::build_pickers(&settings);
     bar.append(&pickers);
 
+    // REC indicator + elapsed timer, shown only while recording.
+    let rec_label = Label::new(None);
+    rec_label.add_css_class("rec-label");
+    rec_label.set_visible(false);
+    bar.append(&rec_label);
+
     let stop = Button::with_label("\u{23f9}  Stop");
     stop.add_css_class("stop-btn");
     stop.set_visible(false);
@@ -121,6 +130,7 @@ fn build_overlay(app: &Application) {
         let win = window.clone();
         let pickers = pickers.clone();
         let stop = stop.clone();
+        let rec_label = rec_label.clone();
         let bar = bar.clone();
         let overlay = overlay.clone();
         Rc::new(move |r: Rect| {
@@ -138,6 +148,9 @@ fn build_overlay(app: &Application) {
                     // hidden widget measures 0, emptying the input region.
                     pickers.set_visible(false);
                     stop.set_visible(true);
+                    rec_label.set_visible(true);
+                    rec_label.set_markup(&rec_markup(0));
+                    start_rec_timer(&rec_label);
                     bar.set_halign(Align::Start);
                     bar.set_margin_start(PAD);
                     let bw = bar.measure(Orientation::Horizontal, -1).1;
@@ -252,6 +265,28 @@ fn stop_and_quit(
     app.quit();
 }
 
+/// Pango markup for the REC indicator: a red dot plus MM:SS elapsed.
+fn rec_markup(secs: u32) -> String {
+    format!(
+        "<span foreground='#ff5d6c'>\u{23fa}</span> {:02}:{:02}",
+        secs / 60,
+        secs % 60
+    )
+}
+
+/// Tick the REC timer once a second, updating `label` with the elapsed time.
+/// Runs until the app quits (one recording per launch).
+fn start_rec_timer(label: &Label) {
+    let label = label.clone();
+    let secs = Rc::new(Cell::new(0u32));
+    gtk4::glib::timeout_add_seconds_local(1, move || {
+        let s = secs.get() + 1;
+        secs.set(s);
+        label.set_markup(&rec_markup(s));
+        gtk4::glib::ControlFlow::Continue
+    });
+}
+
 /// Clamp the bar's desired top-left so the whole bar stays on screen with `pad`
 /// px on every edge.
 fn clamp_to_screen(
@@ -339,6 +374,11 @@ fn load_css() {
             color: #ffffff;
             border-color: rgba(102, 199, 255, 0.6);
         }
+        .rec-label {
+            color: #e6ecf5;
+            font-weight: 600;
+            margin-right: 4px;
+        }
         .stop-btn {
             background: linear-gradient(180deg, #ff5d6c, #e23b4e);
             color: #ffffff;
@@ -361,6 +401,13 @@ fn load_css() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rec_markup_formats_mm_ss() {
+        assert!(rec_markup(0).ends_with(" 00:00"));
+        assert!(rec_markup(75).ends_with(" 01:15"));
+        assert!(rec_markup(3599).ends_with(" 59:59"));
+    }
 
     #[test]
     fn clamp_keeps_bar_inside_padded_screen() {

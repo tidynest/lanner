@@ -69,12 +69,12 @@ pub fn args(format: Format, input: &Path, output: &Path) -> Vec<String> {
             "128k",
         ],
         Format::Gif => &[
-            // ffmpeg palettegen path (no gifski dependency). Cap width at 640: a
-            // full-res GIF balloons past 100 MB, which encodes slowly and makes
-            // many viewers show only the first frame. `\,` escapes the comma in
-            // min() so the filtergraph parser keeps it inside the expression.
+            // ffmpeg palettegen path (no gifski dependency). Cap width at 1280:
+            // near-native for a typical region, but bounded so a giant GIF (which
+            // many viewers render as a single frame) is avoided. `\,` escapes the
+            // comma in min() so the filtergraph parser keeps it in the expression.
             "-vf",
-            "fps=20,scale=min(640\\,iw):-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+            "fps=20,scale=min(1280\\,iw):-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
         ],
         Format::Webm => &[
             "-c:v",
@@ -117,12 +117,28 @@ pub fn spawn(format: Format, input: &Path) -> Result<()> {
         bail!("ffmpeg not found -> install it: sudo pacman -S ffmpeg");
     }
     let output = input.with_extension(format.ext());
-    Command::new("ffmpeg")
+    // Detached `sh` wrapper: run ffmpeg (args via "$@", so the GIF filtergraph's
+    // shell metacharacters stay literal), then notify and copy the path once it
+    // succeeds. notify-send / wl-copy are optional - `command -v` degrades.
+    const WRAP: &str = r#"ffmpeg "$@" || exit 1
+command -v notify-send >/dev/null 2>&1 && notify-send lanner "Saved $LANNER_OUT"
+command -v wl-copy >/dev/null 2>&1 && printf %s "$LANNER_OUT" | wl-copy"#;
+    // setsid + null stdin: run in a new session with no controlling terminal, so
+    // the detached ffmpeg can't take SIGTTIN/SIGHUP from the launching terminal
+    // once lanner exits. Without this, a terminal-launched run left 0-byte files
+    // (ffmpeg died on its first tty stdin read, before writing or notifying).
+    Command::new("setsid")
+        .arg("sh")
+        .arg("-c")
+        .arg(WRAP)
+        .arg("sh") // $0 placeholder; the ffmpeg args become $1.. for "$@"
         .args(args(format, input, &output))
+        .env("LANNER_OUT", &output)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .context("failed to start ffmpeg")?;
+        .context("failed to start transcode")?;
     tracing::info!("transcoding in background -> {}", output.display());
     Ok(())
 }
@@ -152,6 +168,6 @@ mod tests {
         let a = args(Format::Gif, Path::new("in.mkv"), Path::new("out.gif"));
         // Width is capped (escaped comma keeps min() inside the filtergraph),
         // else a full-res GIF balloons and viewers show only one frame.
-        assert!(a.iter().any(|s| s.contains(r"scale=min(640\,iw)")));
+        assert!(a.iter().any(|s| s.contains(r"scale=min(1280\,iw)")));
     }
 }

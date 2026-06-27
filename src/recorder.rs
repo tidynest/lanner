@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use signal_child::Signalable;
 
+use crate::audio::CombinedSource;
 use crate::controls::Audio;
 use crate::overlay::Rect;
 
@@ -18,6 +19,9 @@ use crate::overlay::Rect;
 pub struct Recorder {
     child: Child,
     output: PathBuf,
+    // Held for the recording's lifetime; its Drop unloads the Mic+System
+    // PipeWire modules. None for every other audio source.
+    _combined: Option<CombinedSource>,
 }
 
 impl Recorder {
@@ -33,7 +37,8 @@ impl Recorder {
 
         let mut cmd = Command::new("wf-recorder");
         cmd.arg("-g").arg(&geometry).arg("-f").arg(&output);
-        if let Some(device) = audio_device(audio)? {
+        let (device, combined) = resolve_audio(audio)?;
+        if let Some(device) = device {
             cmd.arg(format!("--audio={device}"));
             tracing::info!("audio source: {device}");
         }
@@ -41,7 +46,11 @@ impl Recorder {
         let child = cmd.spawn().context("failed to spawn wf-recorder")?;
 
         tracing::info!("recording {geometry} -> {}", output.display());
-        Ok(Self { child, output })
+        Ok(Self {
+            child,
+            output,
+            _combined: combined,
+        })
     }
 
     /// Stop recording: SIGINT lets wf-recorder finalise the MKV, then we wait.
@@ -85,12 +94,20 @@ fn output_path() -> Result<PathBuf> {
 }
 
 /// Resolve the wf-recorder `--audio` device for `audio`, querying pactl for the
-/// default sink/source as needed. `None` records silently (no flag, no query).
-fn audio_device(audio: Audio) -> Result<Option<String>> {
+/// active default sink/source as needed. For Mic+System it builds a combined
+/// PipeWire source whose modules are torn down when the returned guard drops.
+/// `None` records silently (no flag, no query).
+fn resolve_audio(audio: Audio) -> Result<(Option<String>, Option<CombinedSource>)> {
     Ok(match audio {
-        Audio::None => None,
-        Audio::System => Some(monitor_source(&pactl("get-default-sink")?)),
-        Audio::Mic => Some(pactl("get-default-source")?),
+        Audio::None => (None, None),
+        Audio::System => (Some(monitor_source(&pactl("get-default-sink")?)), None),
+        Audio::Mic => (Some(pactl("get-default-source")?), None),
+        Audio::MicSystem => {
+            let sink = pactl("get-default-sink")?;
+            let mic = pactl("get-default-source")?;
+            let (combined, device) = CombinedSource::new(&sink, &mic)?;
+            (Some(device), Some(combined))
+        }
     })
 }
 
@@ -118,7 +135,7 @@ mod tests {
 
     #[test]
     fn audio_none_records_silently() {
-        assert!(matches!(audio_device(Audio::None), Ok(None)));
+        assert!(matches!(resolve_audio(Audio::None), Ok((None, None))));
     }
 
     #[test]

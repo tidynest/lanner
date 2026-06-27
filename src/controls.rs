@@ -15,6 +15,7 @@ pub enum Audio {
     None,
     System,
     Mic,
+    MicSystem,
 }
 
 /// User choices, shared between the picker buttons (writers) and the
@@ -49,6 +50,7 @@ pub fn build_pickers(settings: &SharedSettings) -> Box {
             ("None", Audio::None),
             ("System", Audio::System),
             ("Mic", Audio::Mic),
+            ("Mic+System", Audio::MicSystem),
         ],
         Audio::None,
         {

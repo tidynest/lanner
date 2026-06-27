@@ -32,17 +32,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   10s) on the bar. When set, Enter shows the number counting down over the
   selection and only spawns `wf-recorder` at zero, so the countdown is never
   part of the recording. Off keeps the immediate-record path.
+- Niceties (M8): a live REC dot and elapsed timer on the overlay while
+  recording; a Mic+System audio source that mixes the default mic and the system
+  monitor through a temporary PipeWire null sink (torn down on stop); and, when
+  the background transcode finishes, a desktop notification plus a clipboard copy
+  of the saved path via a detached `sh` wrapper (`notify-send` / `wl-copy`, both
+  optional).
 
 ### Changed
 
-- Transcoding runs detached: stopping a recording quits the app and frees the
-  overlay immediately, and `ffmpeg` finishes in the background (it previously
-  blocked the UI until the transcode completed). The MKV is kept if it fails.
+- Transcoding runs detached in a new session (`setsid`): stopping a recording
+  quits the app and frees the overlay immediately, and `ffmpeg` finishes in the
+  background independent of the launching terminal (it previously blocked the UI
+  until the transcode completed). The MKV is kept if it fails.
 - The audio-source picker is disabled while the GIF format is selected, since
   GIF carries no audio track.
 
 ### Fixed
 
-- GIF output is capped to 640 px wide. A full-resolution GIF reached 100+ MB,
-  which encoded very slowly and made many image viewers display only the first
-  frame (the file was animated, just too large to render).
+- GIF width is capped (1280 px). A full-resolution GIF reached 100+ MB, which
+  made many image viewers display only the first frame (the file was animated,
+  just too large to render). With the transcode now backgrounded the speed cost
+  is hidden, so the cap is generous rather than aggressive.

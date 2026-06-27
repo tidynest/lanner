@@ -11,7 +11,8 @@ data moves through the program.
 | `app.rs` | GTK application, the layer-shell overlay window, the control bar, key handling, the lockfile watch, and phase wiring. |
 | `controls.rs` | The pre-draw pickers (audio source, output format, countdown delay) as segmented radio groups, plus the shared `Settings` they write. |
 | `overlay.rs` | The Cairo spotlight (dim, transparent hole, border) and the border-only recording draw, the rubber-band gesture, the selection state, and the per-phase surface input region. |
-| `recorder.rs` | Spawns and stops `wf-recorder`, formats the capture geometry, builds the output path, and returns the finalised MKV path on stop. |
+| `recorder.rs` | Spawns and stops `wf-recorder`, formats the capture geometry, builds the output path, resolves the audio device, and returns the finalised MKV path on stop. |
+| `audio.rs` | The Mic+System combined source: a PipeWire null sink fed by the default mic and the default sink's monitor, recorded via its own monitor and unloaded on drop. |
 | `transcode.rs` | Pure, unit-tested `ffmpeg` argv builders (MP4, WebM, AV1, WebP, GIF) plus a detached runner that converts the MKV to the chosen format in the background. |
 | `lockfile.rs` | Single-instance PID lock in `$XDG_RUNTIME_DIR`; the basis of the keybind toggle. |
 
@@ -34,7 +35,9 @@ data moves through the program.
    rectangle as a `wf-recorder` geometry string (`X,Y WxH`); if an audio source
    was chosen it resolves the
    `pactl` device (System = the default sink's `.monitor`, Mic = the default
-   source) and adds `--audio`. It spawns `wf-recorder`, writing
+   source, Mic+System = a temporary PipeWire null sink mixing both, held by the
+   recorder and unloaded on stop) and adds `--audio`. It spawns `wf-recorder`,
+   writing
    `~/Videos/lanner-<timestamp>.mkv`. The overlay then switches to the recording
    phase:
    - the pre-draw pickers hide and the bar collapses to the Stop button;
@@ -50,13 +53,13 @@ data moves through the program.
    sends `SIGINT` so `wf-recorder` flushes and finalises the MKV, then waits for
    the process to exit.
 5. **Transcode.** On stop, `recorder.rs` returns the MKV path and `app.rs` reads
-   the chosen format from `Settings` and calls `transcode::spawn`, which shells
-   out to `ffmpeg` to convert the MKV beside the original (e.g.
-   `lanner-<ts>.webm`). It is detached: `spawn` does not wait, so the app quits
-   and frees the overlay at once while `ffmpeg` finishes in the background
-   (reparented to init). The MKV is kept as the crash-safe original. A completion
-   notification (and the GIF audio picker being greyed out) round out the UX; the
-   notification is a later milestone.
+   the chosen format from `Settings` and calls `transcode::spawn`. That launches a
+   detached `setsid sh` wrapper which runs `ffmpeg` (args via `"$@"`, so the GIF
+   filtergraph's shell metacharacters stay literal), then fires `notify-send` and
+   copies the path with `wl-copy` once it succeeds. Because it does not wait, the
+   app quits and frees the overlay at once while `ffmpeg` finishes in the
+   background, in its own session so the launching terminal cannot signal it. The
+   MKV is kept as the crash-safe original.
 
 ## Phases and input regions
 
@@ -88,3 +91,6 @@ for the bar, so it hides and you stop with the keybind.
   focused toggle would otherwise swallow Enter (and the press would flip the radio
   back). The key controller runs in the capture phase so the overlay's Enter and
   Esc win over the focused button.
+- A background `ffmpeg` that inherits the launching terminal's stdin dies on its
+  first read once lanner exits, leaving a 0-byte file. The transcode runs under
+  `setsid` with null stdin so it is detached from the terminal entirely.
