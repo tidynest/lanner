@@ -80,6 +80,23 @@ so the overlay is never part of the recording. The hole uses Cairo
 pixel outside the captured rectangle. At a full-screen selection there is no room
 for the bar, so it hides and you stop with the keybind.
 
+## Resolution and monitors
+
+`wf-recorder` captures through wlr-screencopy, which copies the output's physical
+framebuffer, so the recording is always at the output's native resolution - no
+resolution is hardcoded in the capture path. A region on a HiDPI output is
+captured at its physical pixel density automatically. Only the GIF transcode
+applies a deliberate width cap, because GIF compresses far worse than video (no
+interframe coding, LZW, 256 colours) and a native-resolution GIF balloons to
+hundreds of MB.
+
+The `-g` geometry is in logical layout coordinates. Today lanner assumes a single
+output at layout origin `0,0` and scale 1 (where logical == physical). Multi-
+monitor and scaled / non-origin outputs need global-origin translation and per-
+output overlay handling, tracked in
+[issue #9](https://github.com/tidynest/lanner/issues/9); a single region cannot
+span outputs of different density, since wf-recorder records one output.
+
 ## Known gotchas
 
 - On this GTK4 and Wayland stack, `cairo::Context::paint()` drops semi-transparent

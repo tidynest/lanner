@@ -103,6 +103,15 @@ bind = SUPER_SHIFT, R, exec, /path/to/lanner
 At a full-screen selection there is no room for the on-screen controls, so use
 the keybind to stop.
 
+## Limitations
+
+Recording is at the display's native resolution; only the GIF format is
+deliberately downscaled, since a native-resolution GIF is enormous (GIF lacks
+modern video compression). Multi-monitor support is limited: lanner currently
+records a single output and assumes it sits at the layout origin, so selecting on
+a secondary or scaled monitor is not yet correct. Tracked in
+[issue #9](https://github.com/tidynest/lanner/issues/9).
+
 ## Roadmap
 
 - [x] M1: layer-shell spotlight overlay

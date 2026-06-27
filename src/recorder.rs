@@ -66,8 +66,10 @@ impl Recorder {
     }
 }
 
-/// Format a selection as wf-recorder's "X,Y WxH" geometry. Logical == physical
-/// on a single output at scale 1; HiDPI/multiple-output offsets come later.
+/// Format a selection as wf-recorder's "X,Y WxH" geometry, in logical layout
+/// coordinates (wf-recorder captures at the output's native resolution). Assumes a
+/// single output at origin 0,0 and scale 1, where logical == physical; multi-
+/// monitor / HiDPI origin translation is tracked in issue #9.
 fn geometry_arg(rect: Rect) -> Result<String> {
     let w = rect.w.round() as i32;
     let h = rect.h.round() as i32;
