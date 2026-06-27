@@ -33,6 +33,9 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
 ]
+# The allow list is intentionally broad (common permissive licences), so do not
+# warn about entries no current dependency happens to use.
+unused-allowed-license = "allow"
 confidence-threshold = 0.8
 
 [bans]
