@@ -90,12 +90,14 @@ applies a deliberate width cap, because GIF compresses far worse than video (no
 interframe coding, LZW, 256 colours) and a native-resolution GIF balloons to
 hundreds of MB.
 
-The `-g` geometry is in logical layout coordinates. Today lanner assumes a single
-output at layout origin `0,0` and scale 1 (where logical == physical). Multi-
-monitor and scaled / non-origin outputs need global-origin translation and per-
-output overlay handling, tracked in
-[issue #9](https://github.com/tidynest/lanner/issues/9); a single region cannot
-span outputs of different density, since wf-recorder records one output.
+The `-g` geometry is in global logical layout coordinates. `geometry_arg`
+translates the output-local selection by the focused monitor's layout origin
+(read from GDK via `overlay::monitor_origin`), so a secondary monitor at a
+non-zero origin and a scaled (HiDPI) monitor both record correctly. wf-recorder
+auto-selects the output from the geometry (no `-o` needed) and captures at the
+output's native resolution. A single region still cannot span outputs, since
+wf-recorder records one output and the overlay covers one output; per-output
+overlays remain a follow-up ([issue #9](https://github.com/tidynest/lanner/issues/9)).
 
 ## Known gotchas
 

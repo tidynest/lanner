@@ -27,12 +27,12 @@ pub struct Recorder {
 impl Recorder {
     /// Start recording the given region to a fresh MKV under `Videos`,
     /// optionally capturing `audio`.
-    pub fn start(rect: Rect, audio: Audio) -> Result<Self> {
+    pub fn start(rect: Rect, audio: Audio, origin: (i32, i32)) -> Result<Self> {
         if which::which("wf-recorder").is_err() {
             bail!("wf-recorder not found - install it: sudo pacman -S wf-recorder");
         }
 
-        let geometry = geometry_arg(rect)?;
+        let geometry = geometry_arg(rect, origin)?;
         let output = output_path()?;
 
         let mut cmd = Command::new("wf-recorder");
@@ -66,11 +66,11 @@ impl Recorder {
     }
 }
 
-/// Format a selection as wf-recorder's "X,Y WxH" geometry, in logical layout
-/// coordinates (wf-recorder captures at the output's native resolution). Assumes a
-/// single output at origin 0,0 and scale 1, where logical == physical; multi-
-/// monitor / HiDPI origin translation is tracked in issue #9.
-fn geometry_arg(rect: Rect) -> Result<String> {
+/// Format a selection as wf-recorder's "X,Y WxH" geometry, in global logical layout coordinates.
+/// `origin` is the active monitor's layout origin (from `overlay::monitor_origin`).
+/// Adding it shifts an output-local selection onto a secondary monitor. wf-recorder captures at
+/// the output's native resolution, so no scale factor enters (it reads '-g' in logical coordinates.
+fn geometry_arg(rect: Rect, (ox, oy): (i32, i32)) -> Result<String> {
     let w = rect.w.round() as i32;
     let h = rect.h.round() as i32;
     if w < 1 || h < 1 {
@@ -78,8 +78,8 @@ fn geometry_arg(rect: Rect) -> Result<String> {
     }
     Ok(format!(
         "{},{} {w}x{h}",
-        rect.x.round() as i32,
-        rect.y.round() as i32
+        ox + rect.x.round() as i32,
+        oy + rect.y.round() as i32
     ))
 }
 
@@ -151,23 +151,47 @@ mod tests {
     #[test]
     fn geometry_formats_and_rejects_degenerate() {
         assert_eq!(
-            geometry_arg(Rect {
-                x: 100.4,
-                y: 200.6,
-                w: 1280.0,
-                h: 720.0
-            })
+            geometry_arg(
+                Rect {
+                    x: 100.4,
+                    y: 200.6,
+                    w: 1280.0,
+                    h: 720.0
+                },
+                (0, 0)
+            )
             .ok(),
             Some("100,201 1280x720".to_owned())
         );
         assert!(
-            geometry_arg(Rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0
-            })
+            geometry_arg(
+                Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: 0.0,
+                    h: 0.0
+                },
+                (0, 0)
+            )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn geometry_translates_by_origin() {
+        // Selection on a secondary monitor at layout origin (1920, 0).
+        assert_eq!(
+            geometry_arg(
+                Rect {
+                    x: 10.0,
+                    y: 20.0,
+                    w: 100.0,
+                    h: 200.0
+                },
+                (1920, 0)
+            )
+            .ok(),
+            Some("1930,20 100x200".to_owned())
         );
     }
 }

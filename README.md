@@ -107,9 +107,10 @@ the keybind to stop.
 
 Recording is at the display's native resolution; only the GIF format is
 deliberately downscaled, since a native-resolution GIF is enormous (GIF lacks
-modern video compression). Multi-monitor support is limited: lanner currently
-records a single output and assumes it sits at the layout origin, so selecting on
-a secondary or scaled monitor is not yet correct. Tracked in
+modern video compression). Multi-monitor: lanner records the focused output,
+including a secondary monitor at a non-zero origin or a scaled (HiDPI) monitor.
+Per-output overlays (dimming every monitor at once) and a region spanning two
+outputs are not yet supported. Tracked in
 [issue #9](https://github.com/tidynest/lanner/issues/9).
 
 ## Roadmap

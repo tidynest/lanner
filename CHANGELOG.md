@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the background transcode finishes, a desktop notification plus a clipboard copy
   of the saved path via a detached `sh` wrapper (`notify-send` / `wl-copy`, both
   optional).
+- Focused-output multi-monitor capture: the selection is translated by the active
+  monitor's layout origin (read from GDK), so a secondary monitor at a non-zero
+  origin or a scaled (HiDPI) monitor records the correct region. wf-recorder
+  auto-selects the output from the geometry. Rig-verified on a headless output at
+  `(1920,0)` and at scale 2.0 (issue #9).
 
 ### Changed
 
