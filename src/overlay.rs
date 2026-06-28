@@ -79,6 +79,12 @@ pub fn build_surface() -> Surface {
     (area, rect, locked, countdown)
 }
 
+/// Claim the single shared selection for output `i`. One selection exists at a
+/// time across all monitors; a new drag overwrites any prior one (last wins).
+pub fn select_on(_prev: Option<(usize, Rect)>, i: usize, rect: Rect) -> Option<(usize, Rect)> {
+    Some((i, rect))
+}
+
 /// Normalise two corner points into a positive-size rectangle.
 fn normalise(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
     Rect {
@@ -176,4 +182,27 @@ pub fn monitor_origin(surface: &gdk::Surface) -> (i32, i32) {
         .monitor_at_surface(surface)
         .map(|m| (m.geometry().x(), m.geometry().y()))
         .unwrap_or((0, 0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: f64) -> Rect {
+        Rect {
+            x,
+            y: 0.0,
+            w: 10.0,
+            h: 10.0,
+        }
+    }
+
+    #[test]
+    fn select_on_overwrites_last_wins() {
+        let a = select_on(None, 0, r(1.0));
+        assert_eq!(a.map(|(i, rect)| (i, rect.x)), Some((0, 1.0)));
+        // a drag on a different output replaces it entirely
+        let b = select_on(a, 2, r(5.0));
+        assert_eq!(b.map(|(i, rect)| (i, rect.x)), Some((2, 5.0)));
+    }
 }
