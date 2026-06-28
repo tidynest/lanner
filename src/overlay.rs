@@ -166,3 +166,14 @@ pub fn set_input_to_bar(surface: &gdk::Surface, x: i32, y: i32, w: i32, h: i32) 
         cairo::Region::create_rectangle(&cairo::RectangleInt::new(x, y, w.max(0), h.max(0)));
     surface.set_input_region(Some(&region));
 }
+
+/// The active monitor's layout origin (global logical coords) for `surface`,
+/// used to translate an output-local selection into wf-recorder's global `-g`
+/// geometry. Reads GDK state via `monitor_at_surface`.
+pub fn monitor_origin(surface: &gdk::Surface) -> (i32, i32) {
+    surface
+        .display()
+        .monitor_at_surface(surface)
+        .map(|m| (m.geometry().x(), m.geometry().y()))
+        .unwrap_or((0, 0))
+}

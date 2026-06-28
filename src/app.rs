@@ -135,7 +135,11 @@ fn build_overlay(app: &Application) {
         let overlay = overlay.clone();
         Rc::new(move |r: Rect| {
             let audio = settings.borrow().audio;
-            match Recorder::start(r, audio) {
+            let origin = win
+                .surface()
+                .map(|s| crate::overlay::monitor_origin(&s))
+                .unwrap_or((0, 0));
+            match Recorder::start(r, audio, origin) {
                 Ok(rec) => {
                     *recorder.borrow_mut() = Some(rec);
                     locked.set(true);
