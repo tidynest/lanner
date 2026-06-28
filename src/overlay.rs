@@ -1,11 +1,8 @@
 //! The spotlight surface: a DrawingArea that dims the screen and punches a clear
 //! hole while selecting, then shows only the region border while recording.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use gtk4::prelude::*;
-use gtk4::{DrawingArea, GestureDrag, cairo, gdk};
+use gtk4::{cairo, gdk};
 
 /// A selection rectangle in widget (logical) coordinates.
 #[derive(Clone, Copy, Debug)]
@@ -16,69 +13,6 @@ pub struct Rect {
     pub h: f64,
 }
 
-/// What `build_surface` returns: the drawing area, the live selection rect (None
-/// until a drag starts), the lock that freezes selection while recording, and the
-/// countdown value (Some(n) while counting down before record, else None).
-type Surface = (
-    DrawingArea,
-    Rc<Cell<Option<Rect>>>,
-    Rc<Cell<bool>>,
-    Rc<Cell<Option<u32>>>,
-);
-
-/// Build the spotlight DrawingArea with live rubber-band selection.
-pub fn build_surface() -> Surface {
-    let area = DrawingArea::new();
-    area.set_hexpand(true);
-    area.set_vexpand(true);
-
-    // Shared state: the live rectangle (None until a drag starts) and the
-    // point where the current drag began.
-    let rect: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
-    let start: Rc<Cell<(f64, f64)>> = Rc::new(Cell::new((0.0, 0.0)));
-
-    // Set true once recording starts: freezes the selection drag so it can't
-    // move the hole away from the fixed capture geometry.
-    let locked: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-
-    // Some(n) while counting down before recording starts; drives the on-overlay
-    // number and freezes the drag so the hole can't move mid-count.
-    let countdown: Rc<Cell<Option<u32>>> = Rc::new(Cell::new(None));
-
-    {
-        let rect = rect.clone();
-        let locked = locked.clone();
-        let countdown = countdown.clone();
-        area.set_draw_func(move |_, cr, w, h| {
-            if let Err(e) = draw_spotlight(cr, w, h, rect.get(), locked.get(), countdown.get()) {
-                tracing::warn!("spotlight draw failed: {e}");
-            }
-        });
-    }
-
-    let drag = GestureDrag::new();
-    {
-        let start = start.clone();
-        drag.connect_drag_begin(move |_, x, y| start.set((x, y)));
-    }
-    {
-        let rect = rect.clone();
-        let area = area.clone();
-        let locked = locked.clone();
-        let countdown = countdown.clone();
-        drag.connect_drag_update(move |_, dx, dy| {
-            if locked.get() || countdown.get().is_some() {
-                return; // frozen while recording or counting down
-            }
-            let (sx, sy) = start.get();
-            rect.set(Some(normalise(sx, sy, sx + dx, sy + dy)));
-            area.queue_draw();
-        });
-    }
-    area.add_controller(drag);
-    (area, rect, locked, countdown)
-}
-
 /// Claim the single shared selection for output `i`. One selection exists at a
 /// time across all monitors; a new drag overwrites any prior one (last wins).
 pub fn select_on(_prev: Option<(usize, Rect)>, i: usize, rect: Rect) -> Option<(usize, Rect)> {
@@ -86,7 +20,7 @@ pub fn select_on(_prev: Option<(usize, Rect)>, i: usize, rect: Rect) -> Option<(
 }
 
 /// Normalise two corner points into a positive-size rectangle.
-fn normalise(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
+pub fn normalise(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
     Rect {
         x: x0.min(x1),
         y: y0.min(y1),
@@ -95,14 +29,17 @@ fn normalise(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
     }
 }
 
-/// Paint the spotlight. During selection: dim the surround, punch a clear hole,
-/// stroke an accent border. While recording: border only, no dim, so the rest of
-/// the screen stays visible and usable. Cairo errors bubble to the caller.
-fn draw_spotlight(
+/// Paint one output's spotlight. Every non-recording output dims its whole
+/// surface; only the `active` output (the one the selection is on) punches the
+/// clear hole and strokes the border. While recording, the active output shows
+/// the border only and the others draw nothing, so the rest of the desktop stays
+/// visible and usable. Cairo errors bubble to the caller.
+pub fn draw_for(
     cr: &cairo::Context,
     w: i32,
     h: i32,
     rect: Option<Rect>,
+    active: bool,
     recording: bool,
     countdown: Option<u32>,
 ) -> Result<(), cairo::Error> {
@@ -115,6 +52,9 @@ fn draw_spotlight(
     }
 
     if let Some(r) = rect {
+        if !active {
+            return Ok(()); // not the active output: dim only (or blank while recording)
+        }
         if !recording {
             // True transparent hole: Clear writes zero alpha (not a lighter dim).
             cr.set_operator(cairo::Operator::Clear);
@@ -173,15 +113,12 @@ pub fn set_input_to_bar(surface: &gdk::Surface, x: i32, y: i32, w: i32, h: i32) 
     surface.set_input_region(Some(&region));
 }
 
-/// The active monitor's layout origin (global logical coords) for `surface`,
-/// used to translate an output-local selection into wf-recorder's global `-g`
-/// geometry. Reads GDK state via `monitor_at_surface`.
-pub fn monitor_origin(surface: &gdk::Surface) -> (i32, i32) {
-    surface
-        .display()
-        .monitor_at_surface(surface)
-        .map(|m| (m.geometry().x(), m.geometry().y()))
-        .unwrap_or((0, 0))
+/// `monitor`'s layout origin in global logical coords. Adding it translates an
+/// output-local selection into wf-recorder's global `-g` geometry; wf-recorder
+/// reads `-g` in these (global logical) coords, captured at native resolution.
+pub fn monitor_origin(monitor: &gdk::Monitor) -> (i32, i32) {
+    let g = monitor.geometry();
+    (g.x(), g.y())
 }
 
 #[cfg(test)]

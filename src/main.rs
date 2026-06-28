@@ -8,6 +8,7 @@ mod lockfile;
 mod overlay;
 mod recorder;
 mod transcode;
+mod window;
 
 use anyhow::Result;
 
