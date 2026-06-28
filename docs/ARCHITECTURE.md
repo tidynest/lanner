@@ -8,9 +8,10 @@ data moves through the program.
 | Module | Responsibility |
 | :--- | :--- |
 | `main.rs` | Entry point: initialises logging, runs the lockfile toggle check (a second invocation stops the first and exits), then launches the app. |
-| `app.rs` | GTK application, the layer-shell overlay window, the control bar, key handling, the lockfile watch, and phase wiring. |
+| `app.rs` | Coordinator: enumerates outputs, builds one pinned overlay window per output (`window.rs`), picks the bar window (pointer's monitor), the control bar, key handling, the lockfile watch, and the record/stop fan-out. |
 | `controls.rs` | The pre-draw pickers (audio source, output format, countdown delay) as segmented radio groups, plus the shared `Settings` they write. |
-| `overlay.rs` | The Cairo spotlight (dim, transparent hole, border) and the border-only recording draw, the rubber-band gesture, the selection state, and the per-phase surface input region. |
+| `overlay.rs` | The Cairo spotlight draw (dim, transparent hole on the active output, border), the pure selection helpers (`normalise`, `select_on`), the per-phase surface input region, and a monitor's layout origin. |
+| `window.rs` | One pinned layer-shell overlay window per output and the `Shared` selection state; a drag on any output claims the single selection, tagged by output index, and redraws all windows. |
 | `recorder.rs` | Spawns and stops `wf-recorder`, formats the capture geometry, builds the output path, resolves the audio device, and returns the finalised MKV path on stop. |
 | `audio.rs` | The Mic+System combined source: a PipeWire null sink fed by the default mic and the default sink's monitor, recorded via its own monitor and unloaded on drop. |
 | `transcode.rs` | Pure, unit-tested `ffmpeg` argv builders (MP4, WebM, AV1, WebP, GIF) plus a detached runner that converts the MKV to the chosen format in the background. |
@@ -21,32 +22,36 @@ data moves through the program.
 1. **Launch.** `main.rs` initialises `tracing`. If a live lockfile already
    exists, this invocation is a toggle: it deletes the lock (which the running
    instance is watching) and exits. Otherwise it claims the lock and `app.rs`
-   builds a fullscreen overlay surface on the wlroots overlay layer.
-2. **Select.** The control bar is up with the pre-draw pickers (`controls.rs`):
-   audio source and output format, written to a shared `Settings`. `overlay.rs`
-   uses a `GestureDrag` to update a shared rectangle; the draw function dims the
-   whole surface and clears a transparent hole at the current selection. The
-   window key controller is capture-phase, so Enter and Esc reach the overlay
-   even while a picker button holds focus. Esc cancels.
+   enumerates the outputs and builds one pinned fullscreen overlay window per
+   monitor on the wlroots overlay layer, so every monitor dims together.
+2. **Select.** The control bar (on the bar window, the monitor under the pointer
+   at launch) shows the pre-draw pickers (`controls.rs`): audio source and output
+   format, written to a shared `Settings`. A `GestureDrag` on any output
+   (`window.rs`) writes the single shared selection, tagged with that output's
+   index, and redraws every window; only the active output clears a transparent
+   hole, the rest stay dimmed. The bar window holds the keyboard (capture-phase,
+   so Enter and Esc win over a focused picker) and reads the shared selection on
+   Enter. Esc cancels.
 3. **Record (Enter).** If a countdown delay is set, Enter first enters a
    counting-down phase: `overlay.rs` draws the number over the selection and a
    one-second `glib` timer ticks it down; `wf-recorder` is not spawned until it
    reaches zero, so the count is never filmed. Then `recorder.rs` formats the
-   rectangle as a `wf-recorder` geometry string (`X,Y WxH`); if an audio source
+   rectangle, translated by the recording output's layout origin, as a global
+   `wf-recorder` geometry string (`X,Y WxH`); if an audio source
    was chosen it resolves the
    `pactl` device (System = the default sink's `.monitor`, Mic = the default
    source, Mic+System = a temporary PipeWire null sink mixing both, held by the
    recorder and unloaded on stop) and adds `--audio`. It spawns `wf-recorder`,
    writing
-   `~/Videos/lanner-<timestamp>.mkv`. The overlay then switches to the recording
+   `~/Videos/lanner-<timestamp>.mkv`. The windows then switch to the recording
    phase:
-   - the pre-draw pickers hide and the bar collapses to the Stop button;
-   - the dim is dropped, leaving only the region border;
-   - the keyboard is handed to the filmed app (`KeyboardMode::None`);
-   - the surface input region shrinks to just the control bar, so pointer events
-     everywhere else pass through.
-   You can browse, switch workspaces, and type into the recorded app while the
-   region records.
+   - the recording output drops its dim to just the region border; the bar moves
+     onto that output (reparented if it differs from the bar window), collapses to
+     the Stop button, and its input region shrinks to just the bar;
+   - every other output undims entirely and passes all input through;
+   - the keyboard is handed to the filmed app (`KeyboardMode::None`).
+   You can browse, switch workspaces, and type into the recorded app, on any
+   monitor, while the region records.
 4. **Stop.** Any of: the on-overlay Stop button, or a second invocation via the
    keybind. The second invocation deletes the lock; a 150 ms timer in the running
    instance sees it gone and stops. Either path calls into `recorder.rs`, which
@@ -63,13 +68,14 @@ data moves through the program.
 
 ## Phases and input regions
 
-The `locked` flag (shared from `overlay.rs`) marks the recording phase. It drives
-two things: the draw function paints the dim only while not recording, and the
+The `locked` flag (in `window::Shared`) marks the recording phase. It drives two
+things: the draw function paints the dim only while not recording, and the
 selection drag is frozen while recording, or while a countdown is in progress (a
 `countdown` cell holding `Some(n)`), so the hole cannot move away from the fixed
-capture geometry. That same `countdown` cell drives the on-overlay number. During recording the window input region is set to the
-control bar's rectangle alone, which is what lets the rest of the screen stay
-interactive.
+capture geometry. That same `countdown` cell drives the on-overlay number. During
+recording the recording output's input region is set to the control bar's
+rectangle alone and every other output's region is emptied, which is what lets the
+rest of the desktop stay interactive.
 
 ## Key invariant
 
@@ -91,13 +97,15 @@ interframe coding, LZW, 256 colours) and a native-resolution GIF balloons to
 hundreds of MB.
 
 The `-g` geometry is in global logical layout coordinates. `geometry_arg`
-translates the output-local selection by the focused monitor's layout origin
-(read from GDK via `overlay::monitor_origin`), so a secondary monitor at a
-non-zero origin and a scaled (HiDPI) monitor both record correctly. wf-recorder
-auto-selects the output from the geometry (no `-o` needed) and captures at the
-output's native resolution. A single region still cannot span outputs, since
-wf-recorder records one output and the overlay covers one output; per-output
-overlays remain a follow-up ([issue #9](https://github.com/tidynest/lanner/issues/9)).
+translates the output-local selection by the recording output's layout origin
+(each window carries its monitor origin from `overlay::monitor_origin`), so a
+secondary monitor at a non-zero origin and a scaled (HiDPI) monitor both record
+correctly. wf-recorder auto-selects the output from the geometry (no `-o` needed)
+and captures at the output's native resolution. Every monitor gets its own
+overlay, so the selection can be drawn on any output. A single region still
+cannot span outputs, since wf-recorder records one output and one overlay owns the
+selection; spanning selections and monitor hotplug remain out of scope
+([issue #9](https://github.com/tidynest/lanner/issues/9)).
 
 ## Known gotchas
 

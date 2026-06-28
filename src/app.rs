@@ -1,5 +1,6 @@
 //! GTK4 layer-shell overlay: spotlight region selection, then border-only
-//! recording with a floating Stop bar.
+//! recording with a floating Stop bar. One pinned overlay window per output;
+//! the selection lives in shared state, drawn on whichever monitor owns it.
 
 use std::{
     cell::{Cell, RefCell},
@@ -8,13 +9,12 @@ use std::{
 
 use anyhow::{Result, bail};
 use gtk4::{
-    Align, Application, ApplicationWindow, Box, Button, CssProvider, EventControllerKey, Label,
-    Orientation, Overlay,
-    gdk::{Display, Key},
+    Align, Application, Box, Button, CssProvider, EventControllerKey, Label, Orientation,
+    gdk::{Display, Key, Monitor},
     glib::{ExitCode, Propagation},
     prelude::*,
 };
-use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use gtk4_layer_shell::{KeyboardMode, LayerShell};
 
 use crate::controls::{self, Settings, SharedSettings};
 use crate::overlay::Rect;
@@ -22,7 +22,6 @@ use crate::recorder::Recorder;
 use crate::transcode;
 
 const APP_ID: &str = "dev.lanner.Lanner";
-const NAMESPACE: &str = "lanner";
 const PAD: i32 = 10; // distance from edge of screen to control bar
 
 /// Build the GTK application and run it. Returns once the overlay closes.
@@ -46,33 +45,37 @@ pub fn run() -> Result<()> {
 }
 
 fn build_overlay(app: &Application) {
-    let window = ApplicationWindow::builder().application(app).build();
-
-    // Layer-shell config MUST come before the window is realised (present()).
-    window.init_layer_shell();
-    window.set_layer(Layer::Overlay);
-    window.set_namespace(Some(NAMESPACE));
-    for edge in [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom] {
-        window.set_anchor(edge, true); // all four anchored -> stretched fullscreen
+    let Some(display) = Display::default() else {
+        tracing::error!("no display");
+        return;
+    };
+    // n_items + item + downcast: relies only on ListModelExt (no iter::<T>).
+    let list = display.monitors();
+    let monitors: Vec<Monitor> = (0..list.n_items())
+        .filter_map(|i| list.item(i))
+        .filter_map(|o| o.downcast::<Monitor>().ok())
+        .collect();
+    if monitors.is_empty() {
+        tracing::error!("no monitors found");
+        return;
     }
-    window.set_exclusive_zone(-1); // ignore other panels' reserved space
-    window.set_keyboard_mode(KeyboardMode::Exclusive); // so Esc reaches us
 
-    let (surface, rect, locked, countdown) = crate::overlay::build_surface();
-
-    // gtk4::Overlay stacks the control bar on top of the spotlight DrawingArea
-    // (which stays on the draw/input base). The bar shows the pre-draw pickers
-    // during selection, then swaps to a Stop button while recording.
-    let overlay = Overlay::new();
-    overlay.set_child(Some(&surface));
+    // One pinned overlay window per output; all share the selection state.
+    let shared = crate::window::Shared::default();
+    let windows = Rc::new(
+        monitors
+            .iter()
+            .enumerate()
+            .map(|(i, m)| crate::window::build_output_overlay(app, m, i, &shared))
+            .collect::<Vec<_>>(),
+    );
 
     // Shared user choices (audio source + output format), written by the picker
     // buttons and read at record-start (audio) and stop (format).
     let settings: SharedSettings = Rc::new(RefCell::new(Settings::default()));
 
-    // Visible from launch (top-centre) so audio/format can be chosen before the
-    // region is drawn. On record we hide the pickers, reveal Stop, and the bar
-    // moves clear of the capture hole via place_off_hole.
+    // Control bar: pre-draw pickers + REC label + Stop, built once. Hosted by the
+    // bar window's overlay and reparented onto the recording output if different.
     let bar = Box::new(Orientation::Horizontal, 12);
     bar.add_css_class("control-bar");
     bar.set_halign(Align::Center);
@@ -92,9 +95,6 @@ fn build_overlay(app: &Application) {
     stop.add_css_class("stop-btn");
     stop.set_visible(false);
     bar.append(&stop);
-    overlay.add_overlay(&bar);
-
-    window.set_child(Some(&overlay));
 
     let recorder: Rc<RefCell<Option<Recorder>>> = Rc::new(RefCell::new(None));
     {
@@ -119,36 +119,49 @@ fn build_overlay(app: &Application) {
         });
     }
 
-    // The record-start sequence: spawn wf-recorder, swap the bar to Stop, and
-    // shrink the input region. Shared by the immediate path and the countdown
-    // timer's final tick, so the start logic lives in one place.
-    let begin_recording: Rc<dyn Fn(Rect)> = {
+    // Present every window so its surface exists (device_position needs it), then
+    // pick the bar window: the monitor under the pointer at launch, else 0.
+    for w in windows.iter() {
+        w.window.present();
+    }
+    let bar_idx = pointer_window(&windows);
+    windows[bar_idx].overlay.add_overlay(&bar);
+    windows[bar_idx]
+        .window
+        .set_keyboard_mode(KeyboardMode::Exclusive); // exclusive grab = all keys
+
+    // The record-start sequence: spawn wf-recorder on output `idx`, swap that
+    // output's bar to Stop, shrink its input region, and clear the rest. Shared by
+    // the immediate path and the countdown timer's final tick.
+    let begin_recording: Rc<dyn Fn(usize, Rect)> = {
         let recorder = recorder.clone();
         let settings = settings.clone();
-        let locked = locked.clone();
-        let surface = surface.clone();
-        let win = window.clone();
+        let shared = shared.clone();
+        let windows = windows.clone();
+        let bar = bar.clone();
         let pickers = pickers.clone();
         let stop = stop.clone();
         let rec_label = rec_label.clone();
-        let bar = bar.clone();
-        let overlay = overlay.clone();
-        Rc::new(move |r: Rect| {
+        Rc::new(move |idx: usize, r: Rect| {
             let audio = settings.borrow().audio;
-            let origin = win
-                .surface()
-                .map(|s| crate::overlay::monitor_origin(&s))
-                .unwrap_or((0, 0));
+            let origin = windows[idx].origin;
             match Recorder::start(r, audio, origin) {
                 Ok(rec) => {
                     *recorder.borrow_mut() = Some(rec);
-                    locked.set(true);
-                    surface.queue_draw(); // repaint: drop the dim, keep the border
-                    win.set_keyboard_mode(KeyboardMode::None); // hand keys to the filmed app
+                    shared.locked.set(true);
+                    shared.redraw_all(); // recording output -> border; others -> blank
+                    windows[bar_idx]
+                        .window
+                        .set_keyboard_mode(KeyboardMode::None);
 
-                    // Swap the bar from pre-draw pickers to the Stop button, and
-                    // from centred to margin-positioned so place_off_hole can
-                    // steer it clear of the capture. Measure AFTER the swap: a
+                    // Move the bar onto the recording output if it lives elsewhere.
+                    if idx != bar_idx {
+                        windows[bar_idx].overlay.remove_overlay(&bar);
+                        windows[idx].overlay.add_overlay(&bar);
+                    }
+
+                    // Swap pickers -> Stop + REC, then place the bar clear of the
+                    // hole on the recording output. Measure AFTER the swap: a
                     // hidden widget measures 0, emptying the input region.
                     pickers.set_visible(false);
                     stop.set_visible(true);
@@ -157,12 +170,13 @@ fn build_overlay(app: &Application) {
                     start_rec_timer(&rec_label);
                     bar.set_halign(Align::Start);
                     bar.set_margin_start(PAD);
+                    let rec_win = &windows[idx];
                     let bw = bar.measure(Orientation::Horizontal, -1).1;
                     let bh = bar.measure(Orientation::Vertical, -1).1;
                     let bar_rect = match place_off_hole(
                         (bar.margin_start(), bar.margin_top()),
                         (bw, bh),
-                        (overlay.width(), overlay.height()),
+                        (rec_win.overlay.width(), rec_win.overlay.height()),
                         r,
                         PAD,
                     ) {
@@ -177,7 +191,7 @@ fn build_overlay(app: &Application) {
                             (0, 0, 0, 0)
                         }
                     };
-                    if let Some(gdk_surface) = win.surface() {
+                    if let Some(gdk_surface) = rec_win.window.surface() {
                         crate::overlay::set_input_to_bar(
                             &gdk_surface,
                             bar_rect.0,
@@ -186,64 +200,93 @@ fn build_overlay(app: &Application) {
                             bar_rect.3,
                         );
                     }
+
+                    // Every other output: undim + full passthrough.
+                    for w in windows.iter() {
+                        if w.index != idx {
+                            w.clear_passthrough();
+                        }
+                    }
                 }
                 Err(e) => tracing::error!("{e:#}"),
             }
         })
     };
 
+    // Keyboard on the bar window only (exclusive grab receives all keys). Capture
+    // phase: Enter (record) and Esc (cancel) win over a focused picker button.
     let keys = EventControllerKey::new();
-    // Capture phase: the overlay's Enter (record) and Esc (cancel) must win over
-    // any focused picker button, else a focused toggle eats the key first.
     keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
-    let app = app.clone();
-    let surface = surface.clone();
-    let settings = settings.clone();
-    keys.connect_key_pressed(move |_, key, _, _| match key {
-        Key::Return => {
-            // Ignore Enter if already recording or already counting down.
-            if recorder.borrow().is_none()
-                && countdown.get().is_none()
-                && let Some(r) = rect.get()
-            {
-                let secs = settings.borrow().countdown_secs;
-                if secs == 0 {
-                    begin_recording(r);
-                } else {
-                    // Counting down: keep the dim + hole up and draw N, ticking
-                    // once a second. wf-recorder is not spawned until 0, so the
-                    // count is never filmed.
-                    countdown.set(Some(secs));
-                    surface.queue_draw();
-                    let begin = begin_recording.clone();
-                    let countdown = countdown.clone();
-                    let surface = surface.clone();
-                    gtk4::glib::timeout_add_seconds_local(1, move || match countdown.get() {
-                        Some(v) if v > 1 => {
-                            countdown.set(Some(v - 1));
-                            surface.queue_draw();
-                            gtk4::glib::ControlFlow::Continue
-                        }
-                        _ => {
-                            countdown.set(None);
-                            surface.queue_draw();
-                            begin(r);
-                            gtk4::glib::ControlFlow::Break
-                        }
-                    });
+    {
+        let app = app.clone();
+        let settings = settings.clone();
+        let shared = shared.clone();
+        let recorder = recorder.clone();
+        keys.connect_key_pressed(move |_, key, _, _| match key {
+            Key::Return => {
+                // Ignore Enter if already recording, counting down, or no selection.
+                if recorder.borrow().is_none()
+                    && shared.countdown.get().is_none()
+                    && let Some((idx, r)) = shared.active.get()
+                {
+                    let secs = settings.borrow().countdown_secs;
+                    if secs == 0 {
+                        begin_recording(idx, r);
+                    } else {
+                        // Counting down: keep the dim + hole up and draw N, ticking
+                        // once a second. wf-recorder is not spawned until 0, so the
+                        // count is never filmed.
+                        shared.countdown.set(Some(secs));
+                        shared.redraw_all();
+                        let begin = begin_recording.clone();
+                        let shared = shared.clone();
+                        gtk4::glib::timeout_add_seconds_local(1, move || {
+                            match shared.countdown.get() {
+                                Some(v) if v > 1 => {
+                                    shared.countdown.set(Some(v - 1));
+                                    shared.redraw_all();
+                                    gtk4::glib::ControlFlow::Continue
+                                }
+                                _ => {
+                                    shared.countdown.set(None);
+                                    shared.redraw_all();
+                                    begin(idx, r);
+                                    gtk4::glib::ControlFlow::Break
+                                }
+                            }
+                        });
+                    }
                 }
+                Propagation::Stop
             }
-            Propagation::Stop
-        }
-        Key::Escape => {
-            stop_and_quit(&recorder, &app, &settings);
-            Propagation::Stop
-        }
-        _ => Propagation::Proceed,
-    });
-    window.add_controller(keys);
+            Key::Escape => {
+                stop_and_quit(&recorder, &app, &settings);
+                Propagation::Stop
+            }
+            _ => Propagation::Proceed,
+        });
+    }
+    windows[bar_idx].window.add_controller(keys);
+}
 
-    window.present();
+/// Index of the window whose surface currently contains the pointer, else 0.
+/// Best-effort "focused" output for placing the control bar at launch.
+fn pointer_window(windows: &[crate::window::OverlayWindow]) -> usize {
+    let Some(seat) = Display::default().and_then(|d| d.default_seat()) else {
+        return 0;
+    };
+    let Some(pointer) = seat.pointer() else {
+        return 0;
+    };
+    windows
+        .iter()
+        .position(|w| {
+            w.window
+                .surface()
+                .and_then(|s| s.device_position(&pointer))
+                .is_some()
+        })
+        .unwrap_or(0)
 }
 
 /// Stop any active recording (finalises the MKV) and quit. Shared by Esc and
