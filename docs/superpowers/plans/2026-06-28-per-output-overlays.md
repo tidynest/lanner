@@ -494,8 +494,8 @@ Run `lanner` on your normal setup. Confirm: dims, rubber-band selection, record,
 - [ ] **Step 2: Headless dual-monitor rig**
 
 ```bash
-hyprctl output create headless                          # -> HEADLESS-2
-hyprctl keyword monitor HEADLESS-2,1920x1080,1920,0,1
+hyprctl output create headless                          # -> HEADLESS-2 (auto-right)
+hyprctl keyword monitor HEADLESS-2,1920x1080,1920x0,1   # position is XxY, not X,Y
 ```
 
 Launch `lanner`. Confirm BOTH monitors dim. Draw on HEADLESS-2, press Enter, Stop; confirm the MKV captures HEADLESS-2 (play it back). Repeat drawing on eDP-1. While recording one, confirm the other monitor undims and is clickable.

@@ -26,8 +26,9 @@ and later transcode) into a single tool.
 
 ## Features
 
-- Spotlight selection: a fullscreen dim with a live rubber-band rectangle and a
-  true transparent hole, so the region you pick stays clean.
+- Spotlight selection: every monitor dims at once with a live rubber-band
+  rectangle and a true transparent hole; draw the region on whichever monitor you
+  like and that one is recorded.
 - Border-only recording: once recording starts the dim lifts to a single border,
   and pointer and keyboard pass through, so you can use the rest of your system
   (browse, switch workspaces, type into the recorded app) while it records.
@@ -107,10 +108,10 @@ the keybind to stop.
 
 Recording is at the display's native resolution; only the GIF format is
 deliberately downscaled, since a native-resolution GIF is enormous (GIF lacks
-modern video compression). Multi-monitor: lanner records the focused output,
-including a secondary monitor at a non-zero origin or a scaled (HiDPI) monitor.
-Per-output overlays (dimming every monitor at once) and a region spanning two
-outputs are not yet supported. Tracked in
+modern video compression). Multi-monitor: every monitor dims and you can draw the
+region on any of them, including a secondary monitor at a non-zero origin or a
+scaled (HiDPI) monitor; the output you draw on is recorded. A region spanning two
+monitors and live monitor hotplug are not supported. Tracked in
 [issue #9](https://github.com/tidynest/lanner/issues/9).
 
 ## Roadmap

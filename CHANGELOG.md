@@ -43,6 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   origin or a scaled (HiDPI) monitor records the correct region. wf-recorder
   auto-selects the output from the geometry. Rig-verified on a headless output at
   `(1920,0)` and at scale 2.0 (issue #9).
+- Per-output overlays: every monitor gets its own pinned overlay and dims at once;
+  the capture region can be drawn on any monitor (one selection at a time, tagged
+  by output) and that output is recorded. While recording, the other monitors
+  undim and pass input through, and the control bar moves onto the recording
+  output. Verified so far: an overlay maps per output (both outputs on a headless
+  rig), and single-output capture works; the cross-monitor draw, record, and undim
+  path is unit-tested and rig-verified for the geometry but not yet confirmed on
+  physical dual-monitor hardware (issue #9).
 
 ### Changed
 
