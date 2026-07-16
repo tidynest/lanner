@@ -3,6 +3,7 @@
 > Spotlight screen-region video recorder for wlroots Wayland compositors.
 
 [![CI](https://github.com/tidynest/lanner/actions/workflows/ci.yml/badge.svg)](https://github.com/tidynest/lanner/actions/workflows/ci.yml)
+[![GitLab CI](https://gitlab.com/tidynest/lanner/badges/master/pipeline.svg)](https://gitlab.com/tidynest/lanner/-/pipelines)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 Draw a rectangle, record only that area to video. While you select, everything
