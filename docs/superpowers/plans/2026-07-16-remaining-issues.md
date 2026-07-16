@@ -34,7 +34,7 @@ The feature branch `per-output-overlays` is merged (PR #11); the local checkout 
 
 **Files:** none (git housekeeping).
 
-- [ ] **Step 1: Switch to master and pull**
+- [x] **Step 1: Switch to master and pull**
 
 ```bash
 git checkout master
@@ -43,7 +43,7 @@ git pull origin master
 
 Expected: fast-forward to the PR #11 merge commit (`00af2c2`'s successor or later).
 
-- [ ] **Step 2: Delete the merged branch locally and on origin**
+- [x] **Step 2: Delete the merged branch locally and on origin**
 
 ```bash
 git branch -d per-output-overlays
@@ -52,7 +52,7 @@ git push origin --delete per-output-overlays
 
 Expected: `-d` succeeds (proof the branch is fully merged — if git refuses, stop and check why rather than forcing with `-D`). The remote delete may already be a no-op if GitHub auto-deleted it.
 
-- [ ] **Step 3: Clear the anyhow advisory blocking all pushes**
+- [x] **Step 3: Clear the anyhow advisory blocking all pushes** *(done: `bface4a`)*
 
 Discovered on first push: the pre-push gate's `deny` stage rejects `anyhow 1.0.102` — RUSTSEC-2026-0190, unsoundness in `Error::downcast_mut()` (UB when downcasting a context-wrapped error mutably; lanner never calls `downcast_mut`, but the gate's advisory policy is deny-unsound regardless). Fixed upstream in 1.0.103; `Cargo.toml`'s `"1.0.102"` caret requirement already admits it, so only the lockfile moves:
 
@@ -65,7 +65,7 @@ git commit -m "build: bump anyhow to clear RUSTSEC-2026-0190"
 
 Expected: `Updating anyhow v1.0.102 -> v1.0.103` (or later), tests green, and subsequent pushes pass the gate.
 
-- [ ] **Step 4: Commit this plan and push**
+- [x] **Step 4: Commit this plan and push** *(done: `5240c2a`; first GitLab push hit a transient SSH broken pipe — retry succeeded)*
 
 ```bash
 git add docs/superpowers/plans/2026-07-16-remaining-issues.md
@@ -76,7 +76,7 @@ git push gitlab master
 
 Note: local `master` tracks `gitlab/master`, so the prompt shows `⇡N` until both remotes have the commits — push both.
 
-- [ ] **Step 5: Retry the remote branch delete, confirm a clean baseline**
+- [x] **Step 5: Retry the remote branch delete, confirm a clean baseline**
 
 ```bash
 git push origin --delete per-output-overlays
@@ -163,7 +163,7 @@ GitHub CI is already green (the last five runs on master all passed, including t
 - Modify: `README.md:5` (optionally add a GitLab pipeline badge next to the GitHub one)
 - Update: issue #8 (close)
 
-- [ ] **Step 1: Push master to GitLab**
+- [x] **Step 1: Push master to GitLab** *(done during Task 1 Step 4)*
 
 ```bash
 git push gitlab master
@@ -171,7 +171,7 @@ git push gitlab master
 
 Expected: the pre-push gate runs a second time (it fires per-push, per-remote) and passes.
 
-- [ ] **Step 2: Watch the GitLab pipeline**
+- [x] **Step 2: Watch the GitLab pipeline** *(pipeline #6 on master: success, 2026-07-16)*
 
 Open <https://gitlab.com/tidynest/lanner/-/pipelines> (or `glab ci list` if you have glab). The `check` job builds gtk4-layer-shell from source exactly like the GitHub job, so expect ~5-10 min on a shared runner.
 
@@ -182,7 +182,7 @@ Failure modes, in likelihood order:
 - *apt or meson step fails:* the `rust:latest` image changed its Debian base; read the job log — the fix is usually one extra `apt-get install` package in `.gitlab-ci.yml`'s `before_script`.
 - *clippy/fmt fails:* would mean master drifted — it can't, the same commands are green on GitHub; re-check you pushed the same SHA.
 
-- [ ] **Step 3: Verify the badge(s) render**
+- [x] **Step 3: Verify the badge(s) render** *(badge SVGs fetched: GitHub "passing", GitLab "passed"; optional GitLab badge in README still open below)*
 
 Open <https://github.com/tidynest/lanner> — the CI badge at the top of the README must show **passing**, not "no status".
 
@@ -198,7 +198,7 @@ git commit -m "docs: add GitLab pipeline badge"
 git push origin master && git push gitlab master
 ```
 
-- [ ] **Step 4: Close issue #8**
+- [x] **Step 4: Close issue #8** *(closed 2026-07-16; GitLab badge added in `f07c6b1`)*
 
 ```bash
 gh issue close 8 --comment "Green on both platforms: GitHub Actions builds gtk4-layer-shell from source and passes fmt/clippy/test/build; the GitLab check job passes with the same steps. Badges render in the README."
