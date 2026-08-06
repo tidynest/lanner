@@ -4,6 +4,9 @@ on:
   push:
     branches: [ master, main ]
   pull_request:
+  # Manual trigger, so a run lost to a queue backlog or an Actions outage can be
+  # restarted without an empty commit: gh workflow run ci.yml --ref master
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
