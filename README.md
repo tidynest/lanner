@@ -102,8 +102,10 @@ and the next stops:
 bind = SUPER_SHIFT, R, exec, /path/to/lanner
 ```
 
-At a full-screen selection there is no room for the on-screen controls, so use
-the keybind to stop.
+If the selection leaves too little room for the full control bar, the bar drops
+the REC timer and keeps just the Stop button, which needs far less space. At a
+selection that fills the screen entirely there is nowhere to put anything
+without filming it, so the bar hides and the keybind is the way to stop.
 
 ## Limitations
 

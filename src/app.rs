@@ -171,23 +171,25 @@ fn build_overlay(app: &Application) {
                     bar.set_halign(Align::Start);
                     bar.set_margin_start(PAD);
                     let rec_win = &windows[idx];
-                    let bw = bar.measure(Orientation::Horizontal, -1).1;
-                    let bh = bar.measure(Orientation::Vertical, -1).1;
-                    let bar_rect = match place_off_hole(
-                        (bar.margin_start(), bar.margin_top()),
-                        (bw, bh),
-                        (rec_win.overlay.width(), rec_win.overlay.height()),
-                        r,
-                        PAD,
-                    ) {
-                        Some((x, y)) => {
+                    let desired = (bar.margin_start(), bar.margin_top());
+                    let screen = (rec_win.overlay.width(), rec_win.overlay.height());
+                    // Try the full bar first. If a large selection leaves no band
+                    // wide enough, drop the REC timer and retry with Stop alone: a
+                    // reachable Stop button beats a correct-looking clock. Nothing
+                    // is ever placed over the hole, so none of it is filmed.
+                    let placed = measure_and_place(&bar, desired, screen, r).or_else(|| {
+                        rec_label.set_visible(false);
+                        measure_and_place(&bar, desired, screen, r)
+                    });
+                    let bar_rect = match placed {
+                        Some((x, y, w, h)) => {
                             bar.set_margin_start(x);
                             bar.set_margin_top(y);
-                            (x, y, bw, bh)
+                            (x, y, w, h)
                         }
                         None => {
                             bar.set_visible(false);
-                            tracing::info!("full-screen capture: stop with the keybind");
+                            tracing::info!("no room even for Stop: stop with the keybind");
                             (0, 0, 0, 0)
                         }
                     };
@@ -287,6 +289,21 @@ fn pointer_window(windows: &[crate::window::OverlayWindow]) -> usize {
                 .is_some()
         })
         .unwrap_or(0)
+}
+
+/// Measure the bar as it is currently composed and find it a spot clear of
+/// `hole`. Returns the placed `(x, y, w, h)`, or None when nothing fits. Measure
+/// and place together: a hidden widget measures 0, so the size is only valid for
+/// the visibility state it was taken in.
+fn measure_and_place(
+    bar: &Box,
+    desired: (i32, i32),
+    screen: (i32, i32),
+    hole: Rect,
+) -> Option<(i32, i32, i32, i32)> {
+    let w = bar.measure(Orientation::Horizontal, -1).1;
+    let h = bar.measure(Orientation::Vertical, -1).1;
+    place_off_hole(desired, (w, h), screen, hole, PAD).map(|(x, y)| (x, y, w, h))
 }
 
 /// Stop any active recording (finalises the MKV) and quit. Shared by Esc and
@@ -492,5 +509,25 @@ mod tests {
             h: 1080.0,
         };
         assert!(place_off_hole((10, 10), bar, screen, full, PAD).is_none());
+    }
+
+    #[test]
+    fn stop_alone_fits_a_band_too_narrow_for_the_full_bar() {
+        // The premise of the shrink fallback: when the full bar (REC timer +
+        // Stop) will not fit, dropping the timer can still leave a placeable
+        // Stop button. Sizes are representative of the real widgets.
+        let screen = (1920, 1080);
+        let full_bar = (220, 44);
+        let stop_only = (90, 36);
+        // Full-height selection leaving a 170 px band down the right edge.
+        let hole = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1750.0,
+            h: 1080.0,
+        };
+        assert!(place_off_hole((10, 10), full_bar, screen, hole, PAD).is_none());
+        let spot = place_off_hole((10, 10), stop_only, screen, hole, PAD);
+        assert!(spot.is_some_and(|p| !overlaps(p, stop_only, hole)));
     }
 }

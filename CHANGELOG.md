@@ -63,6 +63,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A large selection could leave a recording with no reachable way to stop it: the
+  control bar was hidden whenever it did not fit clear of the capture region, and
+  recording had already released the keyboard for passthrough, so neither the
+  Stop button nor Esc was available. The bar now falls back to the Stop button
+  alone, which fits bands far too narrow for the full bar, so the button survives
+  selections that previously hid it. Only a selection filling the whole screen
+  hides the bar now, and that case stops with the keybind (issue #12).
 - GIF width is capped (1280 px). A full-resolution GIF reached 100+ MB, which
   made many image viewers display only the first frame (the file was animated,
   just too large to render). With the transcode now backgrounded the speed cost
