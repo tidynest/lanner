@@ -24,7 +24,7 @@
 | #9 per-output overlays | physical dual-monitor verification, CHANGELOG truthing, close | 1, 2 |
 | #8 CI on both platforms | GitLab pipeline verification, badge check | 3 |
 | #7 demo recording | record, optimise, embed in README | 4 |
-| #12 unstoppable recording | notify how to stop when the selection hides the Stop bar | 4b |
+| #12 unstoppable recording | fall back to a Stop-only bar when the full bar will not fit | 4b (code done, live check open) |
 | #6 packaging + release | CHANGELOG cut, tag v0.1.0, GitHub release, AUR PKGBUILD, README install docs | 5, 6 |
 
 ---
@@ -312,121 +312,51 @@ Expected: issue #7 shows CLOSED.
 
 ---
 
-### Task 4b: Tell the user how to stop when the Stop bar cannot be placed
+### Task 4b: Keep a Stop control reachable when the full bar will not fit — DONE (`d460fd8`)
 
-*Issue #12 — filed during execution, found by hitting it live:* a large selection leaves no dim band big enough for the ~220×44 bar, so `place_off_hole` returns `None` and `app.rs` hides the bar entirely. Recording has already set `KeyboardMode::None` (passthrough), so Esc is gone too, and layer-shell surfaces ignore the compositor's close-window bind. The only exit is a second keybind press — and the only place lanner says so is `tracing::info!` on stdout, which does not exist when launched from a keybind. That is the one and only situation where this happens, so the message never reaches anyone.
+*Issue #12 — filed during execution, found by hitting it live:* a large selection left a recording with no reachable way to stop it. `place_off_hole` hid the control bar whenever it could not sit clear of the capture region, recording had already set `KeyboardMode::None` for passthrough so Esc was gone, and layer-shell surfaces ignore the compositor's close-window bind. Only the keybind toggle still worked, and the sole hint saying so was a `tracing::info!` line on stdout — which does not exist when lanner is launched from a keybind, the only way this can happen.
 
-Fix: a desktop notification at the moment the bar is hidden. Must land before Task 5 so v0.1.0 ships with it.
+**Approach changed mid-task.** The first attempt sent a `notify-send` desktop notification. That was wrong and was reverted before commit: the notification fires *only* when the selection is near-fullscreen, which is exactly when it is guaranteed to sit inside the capture region, and `--urgency=critical` (chosen so it would persist) meant it would sit in the recording for its whole duration. It broke lanner's "never films its own UI" guarantee. A notification can only be safe if it vanishes before `wf-recorder` starts, which contradicts the persistence that made it useful — so the idea is unusable here, not merely mistimed.
+
+What shipped instead: the bar falls back to the Stop button alone. It is placed through the same `place_off_hole`, so it is outside the capture region by construction and never filmed, and the user gets a clickable Stop rather than instructions.
 
 **Files:**
-- Modify: `src/app.rs:188-192` (the `None` arm of the `place_off_hole` match)
-- Modify: `src/app.rs` (add the `notify` helper next to `stop_and_quit`, around line 292)
-- Modify: `README.md:104-105` (the full-screen-selection note)
-- Modify: `CHANGELOG.md` (`[Unreleased]` → `### Fixed`)
+- Modify: `src/app.rs` (`measure_and_place` helper; two-step placement in `begin_recording`)
+- Modify: `README.md` (the tight-selection note under Usage)
+- Modify: `CHANGELOG.md` (`[Unreleased]` -> `### Fixed`)
 
-**Interfaces:**
-- Produces: `fn notify(body: &str)` — private to `app.rs`, fire-and-forget, no return.
+- [x] **Step 1: `measure_and_place` helper** — added above `stop_and_quit`. Measures the bar as currently composed and runs `place_off_hole`, returning `(x, y, w, h)`. Measure and place together, since a hidden widget measures 0 and the size is only valid for the visibility state it was taken in.
 
-- [ ] **Step 1: Add the `notify` helper**
-
-In `src/app.rs`, immediately above `fn stop_and_quit` (currently line 292):
+- [x] **Step 2: Two-step placement** — try the full bar, and on failure hide `rec_label` and retry with Stop alone:
 
 ```rust
-/// Best-effort desktop notification. `notify-send` is an optional dependency, so
-/// a missing binary or a failed spawn is silently fine. Critical urgency is
-/// deliberate: per the freedesktop spec such notifications never auto-expire, and
-/// this one has to still be on screen when the user starts hunting for a way out.
-fn notify(body: &str) {
-    // ponytail: child is never reaped, so it lingers as a zombie until lanner
-    // exits. notify-send lives for milliseconds and lanner is short-lived, so
-    // that is one defunct entry at worst. Reap it if lanner ever daemonises.
-    let _ = std::process::Command::new("notify-send")
-        .args(["--app-name=lanner", "--urgency=critical", "lanner", body])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
-}
+let placed = measure_and_place(&bar, desired, screen, r).or_else(|| {
+    rec_label.set_visible(false);
+    measure_and_place(&bar, desired, screen, r)
+});
 ```
 
-- [ ] **Step 2: Call it where the bar is hidden**
+The full bar is roughly 220x44 and needs a ~240 px band; Stop alone is roughly 90x36 and needs ~110 px. The trade is losing the elapsed timer on tight selections — a reachable Stop beats a correct-looking clock.
 
-In `src/app.rs`, the `None` arm currently reads:
+- [x] **Step 3: Test** — `stop_alone_fits_a_band_too_narrow_for_the_full_bar` in `app.rs` pins the premise: a 170 px band rejects the full bar and accepts Stop alone. 13 tests pass, `cargo clippy --all-targets -- -D warnings` exits 0.
 
-```rust
-                        None => {
-                            bar.set_visible(false);
-                            tracing::info!("full-screen capture: stop with the keybind");
-                            (0, 0, 0, 0)
-                        }
-```
+- [x] **Step 4: Docs** — README's Usage note and a CHANGELOG `### Fixed` entry, both describing the shrink fallback and the residual full-screen case.
 
-Replace it with:
+- [x] **Step 5: Commit and push** — `d460fd8`, on both remotes.
 
-```rust
-                        None => {
-                            bar.set_visible(false);
-                            notify(
-                                "Recording with no room for the Stop bar. \
-                                 Press your lanner keybind again to stop.",
-                            );
-                            tracing::info!("no room for the stop bar: stop with the keybind");
-                            (0, 0, 0, 0)
-                        }
-```
+- [ ] **Step 6: Verify live, then close #12**
 
-The `tracing::info!` stays — it is still the right record for a terminal-launched run; the notification is what reaches a keybind-launched one.
+Not yet done — needs a real drag on screen. Reproduce the original trap:
 
-- [ ] **Step 3: Build and verify live**
+1. Press the lanner keybind and drag a large selection, one that previously hid the bar entirely (roughly within 70 px of the top and bottom edges, or 250 px of the left and right).
+2. Press Enter. A Stop button must appear in whatever margin is left, with **no** REC timer beside it.
+3. Click Stop. Recording ends, the transcode notification fires, and a final file lands in `~/Videos` beside the MKV — that last part is what proves the clean stop path ran rather than a kill.
+4. Optionally confirm the residual case: a selection covering the entire screen still hides the bar, and the keybind still stops it.
 
 ```bash
-cargo build --release
-cp target/release/lanner ~/.local/bin/     # or ~/.cache/cargo-target/release/lanner
-```
+gh issue close 12 --comment "Fixed in d460fd8. The control bar now falls back to the Stop button alone when the full bar cannot be placed clear of the capture region, so the button survives selections that previously hid it. Placement still goes through place_off_hole, so nothing is ever drawn over the recorded area. A selection covering the whole screen has nowhere to put any control without filming it, so that case still hides the bar and stops with the keybind, as documented in the README.
 
-No new unit test: `notify` is a fire-and-forget spawn with no logic, and the `None` branch that triggers it is already covered by `bar_dodges_hole_or_reports_no_room` in `app.rs`.
-
-Verify by hand — this is the bug's own reproduction:
-
-1. Press the lanner keybind, drag a rectangle covering nearly the whole monitor (within ~70 px of the top and bottom edges, ~250 px of the left and right).
-2. Press Enter. The Stop bar must be absent **and** a notification must appear reading "Recording with no room for the Stop bar…".
-3. Confirm the notification does not auto-dismiss after a few seconds.
-4. Press the lanner keybind again. Recording stops, the transcode notification follows, and a final file appears in `~/Videos` beside the MKV — proof the clean stop path ran rather than a kill.
-
-- [ ] **Step 4: Update the docs**
-
-`README.md` lines 104-105 currently read:
-
-```markdown
-At a full-screen selection there is no room for the on-screen controls, so use
-the keybind to stop.
-```
-
-Replace with:
-
-```markdown
-When the selection leaves no room for the on-screen controls, the bar is hidden
-so it is never filmed, and lanner sends a desktop notification telling you to
-press the keybind again to stop.
-```
-
-In `CHANGELOG.md`, under `[Unreleased]`, add a `### Fixed` entry:
-
-```
-- A selection large enough to leave no room for the control bar hid the Stop
-  button, while recording had already released the keyboard for passthrough, so
-  neither the button nor Esc could stop it. The instruction to use the keybind
-  went only to stdout, which does not exist when lanner is launched from a
-  keybind. lanner now sends a desktop notification instead.
-```
-
-- [ ] **Step 5: Commit and push**
-
-```bash
-git add src/app.rs README.md CHANGELOG.md
-git commit -m "fix: notify how to stop when the control bar cannot be placed (#12)"
-git push origin master && git push gitlab master
-gh issue close 12 --comment "Fixed: lanner now sends a critical-urgency desktop notification when the control bar cannot be placed clear of the selection, pointing at the keybind as the way to stop. Verified by hand with a near-fullscreen selection."
+A desktop notification was tried first and rejected: it fires only when the selection is near-fullscreen, which is precisely when it would be inside the capture region, so it would have been recorded."
 ```
 
 ---
