@@ -24,6 +24,7 @@
 | #9 per-output overlays | physical dual-monitor verification, CHANGELOG truthing, close | 1, 2 |
 | #8 CI on both platforms | GitLab pipeline verification, badge check | 3 |
 | #7 demo recording | record, optimise, embed in README | 4 |
+| #12 unstoppable recording | notify how to stop when the selection hides the Stop bar | 4b |
 | #6 packaging + release | CHANGELOG cut, tag v0.1.0, GitHub release, AUR PKGBUILD, README install docs | 5, 6 |
 
 ---
@@ -308,6 +309,125 @@ gh issue close 7 --comment "Demo recorded (select → record with passthrough �
 ```
 
 Expected: issue #7 shows CLOSED.
+
+---
+
+### Task 4b: Tell the user how to stop when the Stop bar cannot be placed
+
+*Issue #12 — filed during execution, found by hitting it live:* a large selection leaves no dim band big enough for the ~220×44 bar, so `place_off_hole` returns `None` and `app.rs` hides the bar entirely. Recording has already set `KeyboardMode::None` (passthrough), so Esc is gone too, and layer-shell surfaces ignore the compositor's close-window bind. The only exit is a second keybind press — and the only place lanner says so is `tracing::info!` on stdout, which does not exist when launched from a keybind. That is the one and only situation where this happens, so the message never reaches anyone.
+
+Fix: a desktop notification at the moment the bar is hidden. Must land before Task 5 so v0.1.0 ships with it.
+
+**Files:**
+- Modify: `src/app.rs:188-192` (the `None` arm of the `place_off_hole` match)
+- Modify: `src/app.rs` (add the `notify` helper next to `stop_and_quit`, around line 292)
+- Modify: `README.md:104-105` (the full-screen-selection note)
+- Modify: `CHANGELOG.md` (`[Unreleased]` → `### Fixed`)
+
+**Interfaces:**
+- Produces: `fn notify(body: &str)` — private to `app.rs`, fire-and-forget, no return.
+
+- [ ] **Step 1: Add the `notify` helper**
+
+In `src/app.rs`, immediately above `fn stop_and_quit` (currently line 292):
+
+```rust
+/// Best-effort desktop notification. `notify-send` is an optional dependency, so
+/// a missing binary or a failed spawn is silently fine. Critical urgency is
+/// deliberate: per the freedesktop spec such notifications never auto-expire, and
+/// this one has to still be on screen when the user starts hunting for a way out.
+fn notify(body: &str) {
+    // ponytail: child is never reaped, so it lingers as a zombie until lanner
+    // exits. notify-send lives for milliseconds and lanner is short-lived, so
+    // that is one defunct entry at worst. Reap it if lanner ever daemonises.
+    let _ = std::process::Command::new("notify-send")
+        .args(["--app-name=lanner", "--urgency=critical", "lanner", body])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+```
+
+- [ ] **Step 2: Call it where the bar is hidden**
+
+In `src/app.rs`, the `None` arm currently reads:
+
+```rust
+                        None => {
+                            bar.set_visible(false);
+                            tracing::info!("full-screen capture: stop with the keybind");
+                            (0, 0, 0, 0)
+                        }
+```
+
+Replace it with:
+
+```rust
+                        None => {
+                            bar.set_visible(false);
+                            notify(
+                                "Recording with no room for the Stop bar. \
+                                 Press your lanner keybind again to stop.",
+                            );
+                            tracing::info!("no room for the stop bar: stop with the keybind");
+                            (0, 0, 0, 0)
+                        }
+```
+
+The `tracing::info!` stays — it is still the right record for a terminal-launched run; the notification is what reaches a keybind-launched one.
+
+- [ ] **Step 3: Build and verify live**
+
+```bash
+cargo build --release
+cp target/release/lanner ~/.local/bin/     # or ~/.cache/cargo-target/release/lanner
+```
+
+No new unit test: `notify` is a fire-and-forget spawn with no logic, and the `None` branch that triggers it is already covered by `bar_dodges_hole_or_reports_no_room` in `app.rs`.
+
+Verify by hand — this is the bug's own reproduction:
+
+1. Press the lanner keybind, drag a rectangle covering nearly the whole monitor (within ~70 px of the top and bottom edges, ~250 px of the left and right).
+2. Press Enter. The Stop bar must be absent **and** a notification must appear reading "Recording with no room for the Stop bar…".
+3. Confirm the notification does not auto-dismiss after a few seconds.
+4. Press the lanner keybind again. Recording stops, the transcode notification follows, and a final file appears in `~/Videos` beside the MKV — proof the clean stop path ran rather than a kill.
+
+- [ ] **Step 4: Update the docs**
+
+`README.md` lines 104-105 currently read:
+
+```markdown
+At a full-screen selection there is no room for the on-screen controls, so use
+the keybind to stop.
+```
+
+Replace with:
+
+```markdown
+When the selection leaves no room for the on-screen controls, the bar is hidden
+so it is never filmed, and lanner sends a desktop notification telling you to
+press the keybind again to stop.
+```
+
+In `CHANGELOG.md`, under `[Unreleased]`, add a `### Fixed` entry:
+
+```
+- A selection large enough to leave no room for the control bar hid the Stop
+  button, while recording had already released the keyboard for passthrough, so
+  neither the button nor Esc could stop it. The instruction to use the keybind
+  went only to stdout, which does not exist when lanner is launched from a
+  keybind. lanner now sends a desktop notification instead.
+```
+
+- [ ] **Step 5: Commit and push**
+
+```bash
+git add src/app.rs README.md CHANGELOG.md
+git commit -m "fix: notify how to stop when the control bar cannot be placed (#12)"
+git push origin master && git push gitlab master
+gh issue close 12 --comment "Fixed: lanner now sends a critical-urgency desktop notification when the control bar cannot be placed clear of the selection, pointing at the keybind as the way to stop. Verified by hand with a near-fullscreen selection."
+```
 
 ---
 
